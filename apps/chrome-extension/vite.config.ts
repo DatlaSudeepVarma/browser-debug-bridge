@@ -6,17 +6,19 @@ const rootDir = fileURLToPath(new URL(".", import.meta.url));
 
 export default defineConfig({
   publicDir: "public",
+  base: "./",
   build: {
     outDir: "dist",
     emptyOutDir: true,
-    lib: {
-      entry: resolve(rootDir, "src/background.ts"),
-      formats: ["es"],
-      fileName: () => "background.js",
-    },
     rollupOptions: {
+      input: {
+        popup: resolve(rootDir, "popup.html"),
+        background: resolve(rootDir, "src/background.ts"),
+      },
       output: {
-        inlineDynamicImports: true,
+        entryFileNames: "[name].js",
+        chunkFileNames: "chunks/[name].js",
+        assetFileNames: "[name][extname]",
       },
     },
   },

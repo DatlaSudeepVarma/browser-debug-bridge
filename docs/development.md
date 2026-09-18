@@ -71,7 +71,84 @@ pnpm test
 
 `lint` runs ESLint from the repo root.
 
-`test` runs Node's test runner via `tsx` in the schema and redaction packages. The Chrome and VS Code apps have no unit tests yet.
+`test` runs Node's test runner via `tsx` in the schema, redaction, Chrome extension, and VS Code extension packages.
+
+## Local bridge
+
+The VS Code extension owns an HTTP server bound to **`127.0.0.1:17321`**. It starts on activation and stops on deactivation.
+
+| Method | Path | Auth | Purpose |
+| --- | --- | --- | --- |
+| GET | `/health` | public | Liveness |
+| GET | `/pair-status` | public | `{ paired: boolean }` (never the token) |
+| POST | `/pair` | unauthenticated | Submit the pairing token |
+| POST | `/sessions` | Bearer token | Submit a `session.submit` payload |
+| POST | `/sessions/:sessionId/ack` | Bearer token | Acknowledge a stored session |
+
+There is no `/events` WebSocket in this phase.
+
+### Security assumptions
+
+- Only loopback IPv4 (`127.0.0.1`, plus IPv4-mapped `::ffff:127.0.0.1`) is accepted.
+- Browser requests must send `Origin: chrome-extension://<id>` matching `browserDebugBridge.chromeExtensionId`.
+- Requests **without** an `Origin` header are allowed for local VS Code/curl testing. That does not relax browser Origin checks.
+- Session endpoints require `Authorization: Bearer <token>`.
+- Request bodies larger than 5 MB are rejected with HTTP 413.
+- Debug sessions stay in memory (max 20) and are not written to disk.
+- Pairing tokens are never logged, returned from `/health` or `/pair-status`, or stored in source.
+
+### Configure the Chrome origin
+
+Unpacked Chrome extensions do not have a permanent production ID.
+
+1. Build and load `apps/chrome-extension/dist` at `chrome://extensions`.
+2. Copy the extension ID.
+3. In VS Code / Cursor settings, set:
+
+```json
+{
+  "browserDebugBridge.chromeExtensionId": "paste-the-id-here"
+}
+```
+
+4. Run **Browser Debug Bridge: Stop Local Bridge**, then **Start Local Bridge** (or reload the Extension Development Host) so the server picks up the ID.
+
+Until this is set, Chrome popup requests are rejected with `ORIGIN_NOT_ALLOWED`. `curl` to `/health` still works because it has no Origin header.
+
+### Development pairing flow
+
+This is **local development UX**, not production pairing.
+
+1. Launch the VS Code Extension Development Host (F5).
+2. Command Palette → **Browser Debug Bridge: Show Pairing Code**.
+3. Copy the token from the input box. Do not paste it into logs or chat.
+4. Open the Chrome extension popup, paste the token, click **Pair with VS Code**.
+5. Click **Start Debug Session** on a local page, or **Submit test session** for the fake payload. VS Code should log `Session received: <sessionId>`.
+
+The token lives in VS Code `SecretStorage` (`browserDebugBridge.pairingToken`) and, after pairing, in Chrome `chrome.storage.local`. It is generated with `crypto.randomBytes(32)`.
+
+### VS Code commands
+
+| Command | Purpose |
+| --- | --- |
+| Browser Debug Bridge: Hello | Smoke test that the extension loaded |
+| Browser Debug Bridge: Show Pairing Code | Local-dev display of the pairing token |
+| Browser Debug Bridge: Start Local Bridge | Start the loopback server if it is not running |
+| Browser Debug Bridge: Stop Local Bridge | Stop the server (idempotent) |
+| Browser Debug Bridge: Create Test Session | Insert a fake `DebugSessionV1` into the in-memory store |
+
+### Fake session testing
+
+Both sides use `createFakeDebugSessionV1()` from `@browser-debug-bridge/schema`. Values are obviously fake. The Chrome popup **Submit test session** button posts that payload through the paired bridge.
+
+### Bridge tests
+
+```bash
+pnpm --filter browser-debug-bridge-vscode test
+pnpm test
+```
+
+Bridge tests start a real `127.0.0.1` HTTP server on an ephemeral port and do not require the VS Code Extension Host.
 
 ## Build the Chrome extension
 
@@ -86,13 +163,40 @@ Load the unpacked extension in Chrome:
 3. Click **Load unpacked**
 4. Select `apps/chrome-extension/dist`
 
-The built folder must contain `manifest.json` and `background.js`. The service worker only logs that it loaded. Capture, pairing, and debugger permissions are not part of Phase 1.
+The built folder must contain `manifest.json`, `background.js`, `popup.html`, and `content-script.js`. `content-script.js` is produced by a second Vite IIFE build and is injected only when the user starts a debug session.
 
-For rebuild-on-change during extension UI work:
+### Chrome permissions (Phase 4)
+
+| Permission | Why it exists |
+| --- | --- |
+| `storage` | Pairing token in `chrome.storage.local`; capture status in `chrome.storage.session` |
+| `activeTab` | Reach only the tab where the user clicked the extension action |
+| `scripting` | Inject the session-scoped picker/content script into that tab |
+| `host_permissions`: `http://127.0.0.1:17321/*` | Talk to the existing local VS Code bridge |
+
+Not requested: `<all_urls>`, `debugger`, `webRequest`, `cookies`, `tabs`.
+
+### Capture mode
+
+1. Pair Chrome with VS Code.
+2. Open a regular `http(s)` page.
+3. Click **Start Debug Session** in the popup.
+4. Hover to highlight, click to select, enter an optional description, submit.
+5. Press Escape or **Cancel capture** to exit. Reload/navigation removes the picker.
+
+The page never receives the pairing token. Invalid sessions are not sent.
+
+`tabIdHash` is SHA-256 of `salt:tabId` truncated to 32 hex characters. The salt is a 256-bit random per-installation value in `chrome.storage.local` (`browserDebugBridge.tabIdSalt`). It is not a hard-coded secret. Raw tab ids are not stored in DebugSessionV1.
+
+Captured HTML and descriptions are not written to `chrome.storage.local` and do not survive browser restart.
+
+For rebuild-on-change during popup/background work:
 
 ```bash
 pnpm --filter @browser-debug-bridge/chrome-extension dev
 ```
+
+That watch build does not rebuild `content-script.js`. Use `pnpm build:chrome` after picker/content-script changes.
 
 Reload the extension on `chrome://extensions` after each rebuild.
 
@@ -116,4 +220,30 @@ In the Extension Development Host:
 2. Run **Browser Debug Bridge: Hello**
 3. Confirm the information message: `Browser Debug Bridge loaded.`
 
-That Hello command is the only VS Code behavior implemented in Phase 1.
+That Hello command remains available. After F5, the local bridge should already be running. Confirm with:
+
+```bash
+curl http://127.0.0.1:17321/health
+```
+
+### Phase 4 capture smoke test
+
+Use the fixture page at `apps/chrome-extension/test-page/index.html`. It contains only fake secrets.
+
+1. From `apps/chrome-extension/test-page`, serve it on loopback, for example:
+
+   ```bash
+   python -m http.server 4173 --bind 127.0.0.1
+   ```
+
+2. Open `http://127.0.0.1:4173/?token=fake-secret-token`.
+3. Launch the VS Code Extension Development Host and pair Chrome (see above).
+4. Click **Start Debug Session**.
+5. Hover elements and confirm the overlay follows the pointer.
+6. Click **Buy now**, enter a short description, submit.
+7. Confirm VS Code logs `Session received: <sessionId>`.
+8. Confirm the submitted `page.url` redacts `token=` and the captured DOM does not include `FakePassword123!` or `fake-api-key-value`.
+9. Start capture again, press Escape, and confirm the overlay disappears.
+10. Start capture, then reload the tab, and confirm the picker is gone.
+
+Do not use real credentials. This phase does not capture screenshots, console, or network.

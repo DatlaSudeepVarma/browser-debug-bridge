@@ -3,9 +3,12 @@
   "tasks": [
     {
       "label": "build-vscode-extension",
-      "type": "npm",
-      "script": "build",
-      "path": "apps/vscode-extension/",
+      "type": "shell",
+      "command": "pnpm --filter @browser-debug-bridge/schema run build && pnpm --filter browser-debug-bridge-vscode run build",
+      "options": {
+        "cwd": "${workspaceFolder}",
+        "env": {}
+      },
       "problemMatcher": "$tsc",
       "group": {
         "kind": "build",

@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Browser Debug Bridge capture fixture</title>
+    <style>
+      body {
+        font-family: sans-serif;
+        margin: 24px;
+        max-width: 720px;
+      }
+      .card {
+        border: 1px solid #ccc;
+        padding: 16px;
+        margin: 16px 0;
+      }
+      .primary {
+        background: #ff4d00;
+        color: #fff;
+        border: 0;
+        padding: 8px 16px;
+      }
+      input {
+        display: block;
+        margin: 8px 0;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Local capture fixture</h1>
+      <p>This page uses obviously fake secrets for redaction checks. Do not use real credentials.</p>
+      <section id="pricing" data-section="pricing">
+        <div class="card">
+          <h2>Pricing</h2>
+          <button id="pricing-cta" class="primary" data-testid="pricing-cta" type="button">
+            Buy now
+          </button>
+        </div>
+      </section>
+      <section class="card">
+        <h2>Fake sensitive fields</h2>
+        <form action="/account?token=fake-secret-token" method="post">
+          <label>
+            Fake password
+            <input id="password" name="password" type="password" value="FakePassword123!" />
+          </label>
+          <input type="hidden" name="api_key" value="fake-api-key-value" />
+          <a href="javascript:alert('fake')">Fake javascript link</a>
+        </form>
+        <p>
+          Query example:
+          <a href="/account?id=42&token=fake-secret-token">open with fake token query</a>
+        </p>
+      </section>
+    </main>
+  </body>
+</html>

@@ -14,20 +14,20 @@ No cloud backend is part of V1. The product stays on the developer's machine.
 
 ## Current development status
 
-This repository is in **early development (Phase 2)**.
+This repository is in **early development (Phase 4)**.
 
-Phase 1 scaffolded the monorepo. Phase 2 adds the shared DebugSession/protocol schema and redaction utilities.
+Phase 1 scaffolded the monorepo. Phase 2 added the shared schema and redaction packages. Phase 3 added a local loopback HTTP bridge. Phase 4 adds a session-scoped Chrome element picker and bounded DOM/CSS capture that submits a real `DebugSessionV1` through that bridge.
 
 The following are **not implemented yet**:
 
-- Chrome debugging capture (console, network, DOM, screenshots)
-- Chrome ↔ VS Code communication
-- Pairing or a local bridge server
-- Workspace analysis
+- Screenshots
+- Console capture
+- Network capture
+- WebSocket events
+- Workspace analysis / project intelligence
 - AI diagnosis
-- Code patching
-
-The only VS Code runtime behavior is still the smoke-test command: **Browser Debug Bridge: Hello**.
+- VS Code Debug Session TreeView
+- Code patching / diffs / file modification
 
 ## Architecture overview
 
@@ -35,11 +35,11 @@ The repository is a pnpm + TypeScript monorepo:
 
 | Area | Role |
 | --- | --- |
-| Chrome extension | Future capture surface for a debugging session (Manifest V3) |
-| VS Code extension | Future diagnosis and proposed-fix UI |
+| Chrome extension | Manifest V3 extension: pair, pick an element, submit a sanitized DebugSession |
+| VS Code extension | Owns the local loopback HTTP bridge and in-memory session store |
 | `@browser-debug-bridge/schema` | DebugSession V1 and protocol message Zod schemas |
 | `@browser-debug-bridge/redaction` | URL, DOM, text, and workspace-path sanitization |
-| Local bridge | Future Chrome ↔ VS Code transport (not scaffolded as a separate app) |
+| Local bridge | HTTP on `127.0.0.1:17321` inside the VS Code extension process |
 | AI providers | Future, behind an abstraction; not implemented |
 
 See [docs/architecture.md](docs/architecture.md) for the decided architecture.
@@ -76,20 +76,21 @@ pnpm test
 
 Full commands are in [docs/development.md](docs/development.md).
 
-## Current Phase 2 scope
+## Current Phase 4 scope
 
-- Versioned `DebugSessionV1` Zod schema and inferred types
-- Versioned Chrome ↔ VS Code protocol *message* schemas (no transport)
-- Redaction helpers for URLs, DOM-like data, sensitive text, and patch paths
-- Unit tests for schema, protocol, and redaction
+- Session-scoped element picker on the current tab (`activeTab` + `scripting`)
+- Bounded selected-element, DOM, and computed-CSS capture
+- Shared redaction + schema validation before `session.submit`
+- Existing local HTTP bridge and in-memory VS Code session store
+- Chrome unit tests for selectors, CSS allowlisting, DOM truncation, tab hashing, and session construction
 
-Phase 1 remains in place: pnpm workspace, strict TypeScript, Chrome/VS Code extension foundations, and the Hello command.
+Screenshots, console, network, WebSocket events, AI, and patching are not part of this phase.
 
 ## Future roadmap
 
 Later phases are expected to add, in order:
 
-1. Chrome capture and the local Chrome ↔ VS Code bridge
+1. Additional Chrome capture (console, network, screenshots)
 2. VS Code Debug Session UI
 3. Project-aware diagnosis
 4. Proposed fixes with developer approval before apply

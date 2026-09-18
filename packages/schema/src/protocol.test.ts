@@ -17,6 +17,8 @@ describe("protocol messages", () => {
       protocolVersion: 1,
       type: "health.response",
       status: "ok",
+      service: "browser-debug-bridge",
+      extensionVersion: "0.1.0",
       serverTime: "2026-09-18T16:00:00.000Z",
     });
     assert.equal(parsed.type, "health.response");
@@ -41,6 +43,17 @@ describe("protocol messages", () => {
       protocolVersion: 1,
       type: "pair.status",
       state: "paired",
+      paired: true,
+    });
+    parseProtocolMessage({
+      protocolVersion: 1,
+      type: "pair.token",
+      token: "a".repeat(64),
+    });
+    parseProtocolMessage({
+      protocolVersion: 1,
+      type: "pair.token.result",
+      paired: true,
     });
   });
 

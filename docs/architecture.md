@@ -23,11 +23,25 @@ V1 does not include a cloud backend, hosted API, dashboard, or database. Work st
 
 ## 2. Chrome extension
 
-`apps/chrome-extension` is a Manifest V3 Chrome extension.
+`apps/chrome-extension` is a Manifest V3 extension.
 
-Its future job is to participate in a browser debugging session and send a sanitized session payload toward VS Code. In later phases that includes capture of debugging signals such as console output, network activity, and DOM context.
+Phase 4 capture is session-scoped. The popup **Start Debug Session** control asks the service worker to inject `content-script.js` into the current tab with `chrome.scripting.executeScript` and `activeTab`. There is no permanent `content_scripts` registration and no `<all_urls>` permission.
 
-Phase 1 only establishes the TypeScript + Vite + Manifest V3 foundation. It does not request debug, scripting, or host permissions, and it does not implement capture, pairing, or localhost communication.
+```
+Page (picker / DOM / CSS)
+    → chrome.runtime messaging
+    → service worker
+    → redaction + DebugSessionV1 + session.submit
+    → existing submitSession() bridge client
+    → 127.0.0.1:17321
+    → VS Code in-memory store
+```
+
+The content script never receives the pairing token. Bridge authentication stays in the service worker and `src/bridge` client.
+
+Temporary picker/session status uses `chrome.storage.session`. The pairing token and a per-installation tab-id salt stay in `chrome.storage.local`. Captured HTML is not written to `chrome.storage.local` and is not persisted across browser restarts.
+
+Phase 4 does **not** capture screenshots, console, or network data. Those arrays/metadata exist only because DebugSessionV1 requires them: screenshot is placeholder metadata, `console` and `network` are empty.
 
 ## 3. VS Code extension
 
@@ -35,7 +49,7 @@ Phase 1 only establishes the TypeScript + Vite + Manifest V3 foundation. It does
 
 Its future job is to receive a debug session, inspect the open project, present a diagnosis, and propose a code fix. The developer reviews the proposal and chooses whether to apply it.
 
-Phase 1 only establishes the extension foundation and a Hello smoke-test command. It does not start a bridge server, analyze the workspace, show a Debug Session tree, call an AI provider, or modify files.
+Phase 1 established the extension foundation and a Hello smoke-test command. Phase 3 starts a loopback HTTP bridge inside the extension process, stores pairing tokens in SecretStorage, and keeps recent DebugSession payloads in memory. It does not analyze the workspace, show a Debug Session tree, call an AI provider, or modify files.
 
 ## 4. Shared packages
 
@@ -61,30 +75,76 @@ Phase 2 implements reusable, host-agnostic sanitization:
 - secret/JWT-like text handling
 - workspace patch path protection
 
-These functions do not depend on Chrome or VS Code APIs. Capture, pairing, and patch application are later phases.
+Chrome capture reuses these functions. It does not duplicate redaction rules. Page text, URLs, attributes, and user descriptions are data, never instructions.
 
 There is no separate protocol-client, API, or server package in V1.
 
-## 5. Future local bridge
+## 5. Local bridge
 
-Chrome and VS Code will communicate through a **local bridge** on the developer's machine.
+Chrome and VS Code communicate through a **local HTTP bridge** owned by the VS Code extension.
 
-The bridge is a future concern. It is not a standalone app in this repository today, and Phase 1 does not implement HTTP, WebSocket, pairing, or transport code. When it is added, it remains local-first: Chrome ↔ local bridge ↔ VS Code, with no cloud hop in the V1 path.
+- Bind address: `127.0.0.1` only (never `0.0.0.0`)
+- Port: `17321` (`BRIDGE_PORT`)
+- Transport in this phase: HTTP only (no WebSocket `/events` yet)
+- Auth: `Authorization: Bearer <pairing-token>` on session endpoints
+- Pairing token: 256-bit value in VS Code `SecretStorage`, copied into Chrome `chrome.storage.local` via the development pairing command
+- Origin: browser requests must use `chrome-extension://<configured-id>`
+- Sessions: validated with `@browser-debug-bridge/schema`, stored in memory (max 20), not written to disk
+
+There is no separate Node app, cloud API, or database.
 
 ## 6. Future AI provider abstraction
 
 Project-aware diagnosis and proposed fixes will use an AI provider behind an abstraction.
 
-That abstraction is not implemented in Phase 1. Provider SDKs are not dependencies of this repository. When AI is added, it should be swappable, local to the developer's workflow, and never applied to the codebase without approval.
+That abstraction is not implemented. Provider SDKs are not dependencies of this repository. When AI is added, it should be swappable, local to the developer's workflow, and never applied to the codebase without approval.
 
 ## 7. Security-first philosophy
 
 Security is a product constraint, not a later add-on:
 
 - Local-first: session data is not designed to leave the machine for a V1 backend.
-- Least privilege: the Chrome extension starts with no debug or host permissions; later permissions must be justified by a specific capture need.
-- Redaction before sharing: URLs, DOM, secrets, and sensitive fields are stripped in `@browser-debug-bridge/redaction` before a session is used for diagnosis.
+- Least privilege: Chrome permissions are storage, `activeTab`, `scripting`, and the existing loopback host permission. `debugger`, `webRequest`, `cookies`, `tabs`, and `<all_urls>` are not requested.
+- Redaction before sharing: URLs, DOM, secrets, and sensitive fields are stripped in `@browser-debug-bridge/redaction` before a session is submitted.
 - Patch path protection: generated fixes must not silently touch protected paths.
 - Human approval: diagnosis may propose a fix; only the developer applies it.
 
-Phase 1 does not implement capture or transport. Phase 2 implements the schema and redaction packages so later phases have a contract and sanitization layer without introducing a cloud service.
+Phase 4 implements session-scoped element capture on top of the Phase 3 bridge. AI, project intelligence, TreeView, diffs, and file modification remain later phases.
+
+## 8. Phase 4 capture details
+
+### Permissions
+
+| Permission | Why |
+| --- | --- |
+| `storage` | Pairing token (`local`) and temporary capture status (`session`) |
+| `activeTab` | Access only the tab the user invoked the extension on |
+| `scripting` | Inject the picker/content script for that capture session |
+| `host_permissions`: `http://127.0.0.1:17321/*` | Existing local bridge (unchanged) |
+
+`activeTab` + `scripting` are sufficient for session-scoped page interaction. Host access to arbitrary sites is not required because the user starts capture from the toolbar popup on the current tab.
+
+### Element picker
+
+The injected script draws a temporary overlay (`data-bdb-picker-host`) in a closed shadow root. Hover highlights the element under the pointer; click selects it; Escape cancels. The overlay is removed on select (after the description prompt), cancel, navigation/`pagehide`, or extension disconnect. It does not persist styles in the application.
+
+### Captured fields
+
+The payload is a `DebugSessionV1`:
+
+- `selectedElement`: selector, tag, id, classes, role, textPreview, rect, ancestorPath
+- `dom`: `outerHtmlTruncated`, `htmlBytes`, `truncated`
+- `css`: allowlisted `computedSubset` plus compact `matchedRuleSummaries`
+- `page`: redacted url/title/origin
+- `browser`: Chrome/Chromium name + version + extension version
+- `userDescription`: optional, schema-bounded, untrusted text
+- `capture.tabIdHash`: SHA-256 of `salt:tabId` (32 hex chars). Salt is a per-installation 256-bit random value in `chrome.storage.local` (`browserDebugBridge.tabIdSalt`). Raw tab ids are never stored in the session.
+- `capture.permissionsGranted`: `activeTab` and `scripting` only
+
+`htmlBytes` is the UTF-8 size of the sanitized HTML before truncation, capped at the schema maximum.
+
+### Not captured
+
+Cookies, authorization headers, `localStorage` / `sessionStorage` / IndexedDB, password-manager data, screenshot bytes, console logs, network requests, and workspace files.
+
+Cross-origin stylesheets that throw when reading `cssRules` are skipped. Capture continues; a bounded evidence note may be added.

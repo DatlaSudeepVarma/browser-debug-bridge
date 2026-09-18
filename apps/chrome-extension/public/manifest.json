@@ -1,0 +1,10 @@
+{
+  "manifest_version": 3,
+  "name": "Browser Debug Bridge",
+  "version": "0.1.0",
+  "description": "Local-first Chrome extension foundation for Browser Debug Bridge. Debugging capture is not implemented in Phase 1.",
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  }
+}

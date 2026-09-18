@@ -1,0 +1,13 @@
+node_modules/
+dist/
+out/
+.vscode-test/
+*.vsix
+.env
+.env.*
+coverage/
+.DS_Store
+Thumbs.db
+*.log
+.pnpm-debug.log*
+*.tsbuildinfo

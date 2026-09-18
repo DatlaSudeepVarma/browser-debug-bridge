@@ -1,0 +1,34 @@
+{
+  "name": "browser-debug-bridge-vscode",
+  "displayName": "Browser Debug Bridge",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Browser debugging session → project-aware diagnosis → proposed code fix.",
+  "publisher": "browser-debug-bridge",
+  "engines": {
+    "vscode": "^1.90.0"
+  },
+  "categories": ["Other"],
+  "activationEvents": ["onCommand:browserDebugBridge.hello"],
+  "main": "./out/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "browserDebugBridge.hello",
+        "title": "Hello",
+        "category": "Browser Debug Bridge"
+      }
+    ]
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "watch": "tsc -p tsconfig.json --watch",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "node -e \"console.log('No tests in this package')\""
+  },
+  "devDependencies": {
+    "@types/node": "^24.3.0",
+    "@types/vscode": "^1.90.0",
+    "typescript": "^5.9.2"
+  }
+}

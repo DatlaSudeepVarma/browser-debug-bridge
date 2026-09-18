@@ -1,0 +1,9 @@
+{
+  "schemaVersion": 2,
+  "sessionId": "not-a-uuid",
+  "createdAt": "yesterday",
+  "page": {
+    "title": "Missing required url and origin"
+  },
+  "userDescription": "This fixture is intentionally invalid and contains no secrets."
+}

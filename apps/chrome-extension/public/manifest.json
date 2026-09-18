@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "Browser Debug Bridge",
   "version": "0.1.0",
-  "description": "Local-first Chrome extension for Browser Debug Bridge. Phase 3 can pair with VS Code and submit a fake debug session. Browser capture is not implemented yet.",
+  "description": "Local-first Chrome extension for Browser Debug Bridge. Phase 4 can pair with VS Code and capture a selected DOM element.",
   "background": {
     "service_worker": "background.js",
     "type": "module"
@@ -11,6 +11,6 @@
     "default_title": "Browser Debug Bridge",
     "default_popup": "popup.html"
   },
-  "permissions": ["storage"],
+  "permissions": ["storage", "activeTab", "scripting"],
   "host_permissions": ["http://127.0.0.1:17321/*"]
 }

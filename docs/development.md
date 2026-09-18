@@ -71,7 +71,7 @@ pnpm test
 
 `lint` runs ESLint from the repo root.
 
-`test` runs Node's test runner via `tsx` in the schema, redaction, and VS Code extension packages. The Chrome extension has no unit tests yet.
+`test` runs Node's test runner via `tsx` in the schema, redaction, Chrome extension, and VS Code extension packages.
 
 ## Local bridge
 
@@ -123,7 +123,7 @@ This is **local development UX**, not production pairing.
 2. Command Palette → **Browser Debug Bridge: Show Pairing Code**.
 3. Copy the token from the input box. Do not paste it into logs or chat.
 4. Open the Chrome extension popup, paste the token, click **Pair with VS Code**.
-5. Click **Submit test session**. VS Code should log `Session received: <sessionId>`.
+5. Click **Start Debug Session** on a local page, or **Submit test session** for the fake payload. VS Code should log `Session received: <sessionId>`.
 
 The token lives in VS Code `SecretStorage` (`browserDebugBridge.pairingToken`) and, after pairing, in Chrome `chrome.storage.local`. It is generated with `crypto.randomBytes(32)`.
 
@@ -163,13 +163,40 @@ Load the unpacked extension in Chrome:
 3. Click **Load unpacked**
 4. Select `apps/chrome-extension/dist`
 
-The built folder must contain `manifest.json`, `background.js`, and `popup.html`. Capture and debugger permissions are not part of this phase. The popup is development pairing UX only.
+The built folder must contain `manifest.json`, `background.js`, `popup.html`, and `content-script.js`. `content-script.js` is produced by a second Vite IIFE build and is injected only when the user starts a debug session.
 
-For rebuild-on-change during extension UI work:
+### Chrome permissions (Phase 4)
+
+| Permission | Why it exists |
+| --- | --- |
+| `storage` | Pairing token in `chrome.storage.local`; capture status in `chrome.storage.session` |
+| `activeTab` | Reach only the tab where the user clicked the extension action |
+| `scripting` | Inject the session-scoped picker/content script into that tab |
+| `host_permissions`: `http://127.0.0.1:17321/*` | Talk to the existing local VS Code bridge |
+
+Not requested: `<all_urls>`, `debugger`, `webRequest`, `cookies`, `tabs`.
+
+### Capture mode
+
+1. Pair Chrome with VS Code.
+2. Open a regular `http(s)` page.
+3. Click **Start Debug Session** in the popup.
+4. Hover to highlight, click to select, enter an optional description, submit.
+5. Press Escape or **Cancel capture** to exit. Reload/navigation removes the picker.
+
+The page never receives the pairing token. Invalid sessions are not sent.
+
+`tabIdHash` is SHA-256 of `salt:tabId` truncated to 32 hex characters. The salt is a 256-bit random per-installation value in `chrome.storage.local` (`browserDebugBridge.tabIdSalt`). It is not a hard-coded secret. Raw tab ids are not stored in DebugSessionV1.
+
+Captured HTML and descriptions are not written to `chrome.storage.local` and do not survive browser restart.
+
+For rebuild-on-change during popup/background work:
 
 ```bash
 pnpm --filter @browser-debug-bridge/chrome-extension dev
 ```
+
+That watch build does not rebuild `content-script.js`. Use `pnpm build:chrome` after picker/content-script changes.
 
 Reload the extension on `chrome://extensions` after each rebuild.
 
@@ -198,3 +225,25 @@ That Hello command remains available. After F5, the local bridge should already 
 ```bash
 curl http://127.0.0.1:17321/health
 ```
+
+### Phase 4 capture smoke test
+
+Use the fixture page at `apps/chrome-extension/test-page/index.html`. It contains only fake secrets.
+
+1. From `apps/chrome-extension/test-page`, serve it on loopback, for example:
+
+   ```bash
+   python -m http.server 4173 --bind 127.0.0.1
+   ```
+
+2. Open `http://127.0.0.1:4173/?token=fake-secret-token`.
+3. Launch the VS Code Extension Development Host and pair Chrome (see above).
+4. Click **Start Debug Session**.
+5. Hover elements and confirm the overlay follows the pointer.
+6. Click **Buy now**, enter a short description, submit.
+7. Confirm VS Code logs `Session received: <sessionId>`.
+8. Confirm the submitted `page.url` redacts `token=` and the captured DOM does not include `FakePassword123!` or `fake-api-key-value`.
+9. Start capture again, press Escape, and confirm the overlay disappears.
+10. Start capture, then reload the tab, and confirm the picker is gone.
+
+Do not use real credentials. This phase does not capture screenshots, console, or network.

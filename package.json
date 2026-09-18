@@ -14,7 +14,7 @@
     "build:vscode": "pnpm --filter browser-debug-bridge-vscode build",
     "typecheck": "pnpm --filter @browser-debug-bridge/schema --filter @browser-debug-bridge/redaction run build && pnpm -r --if-present typecheck",
     "test": "pnpm -r --if-present test",
-    "lint": "eslint apps/chrome-extension/src apps/chrome-extension/vite.config.ts apps/vscode-extension/src packages/schema/src packages/redaction/src eslint.config.mjs"
+    "lint": "eslint apps/chrome-extension/src apps/chrome-extension/vite.config.ts apps/chrome-extension/vite.content.config.ts apps/vscode-extension/src packages/schema/src packages/redaction/src eslint.config.mjs"
   },
   "devDependencies": {
     "@eslint/js": "^9.35.0",

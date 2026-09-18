@@ -5,18 +5,20 @@
   "type": "module",
   "description": "Manifest V3 Chrome extension for Browser Debug Bridge.",
   "scripts": {
-    "build": "vite build",
+    "build": "vite build && vite build --config vite.content.config.ts",
     "dev": "vite build --watch",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "node -e \"console.log('No tests in this package')\""
+    "test": "tsx --test src/capture/selectors.test.ts src/capture/css.test.ts src/capture/dom.test.ts src/capture/session.test.ts src/capture/tab-hash.test.ts"
   },
   "devDependencies": {
     "@types/chrome": "^0.1.4",
     "@types/node": "^24.3.0",
+    "tsx": "^4.20.5",
     "typescript": "^5.9.2",
     "vite": "^7.1.5"
   },
   "dependencies": {
+    "@browser-debug-bridge/redaction": "workspace:*",
     "@browser-debug-bridge/schema": "workspace:*"
   }
 }

@@ -7,7 +7,7 @@
       body {
         font-family: sans-serif;
         margin: 12px;
-        width: 280px;
+        width: 320px;
       }
       label,
       input,
@@ -20,17 +20,28 @@
       }
       pre {
         white-space: pre-wrap;
-        min-height: 3em;
+        min-height: 4em;
+      }
+      h1 {
+        font-size: 16px;
+      }
+      h2 {
+        font-size: 13px;
+        margin: 12px 0 4px;
       }
     </style>
   </head>
   <body>
     <h1>Debug Bridge</h1>
-    <p>Development pairing only. Capture is not implemented yet.</p>
+    <p>Development capture UI. Pair first, then start a debug session on the current tab.</p>
+    <h2>Pairing</h2>
     <label for="token">Pairing token</label>
     <input id="token" type="password" autocomplete="off" />
     <button id="pair" type="button">Pair with VS Code</button>
     <button id="health" type="button">Check health</button>
+    <h2>Capture</h2>
+    <button id="start-capture" type="button">Start Debug Session</button>
+    <button id="cancel-capture" type="button">Cancel capture</button>
     <button id="submit" type="button">Submit test session</button>
     <pre id="status">Ready.</pre>
     <script type="module" src="/src/popup.ts"></script>

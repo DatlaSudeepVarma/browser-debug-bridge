@@ -14,19 +14,20 @@ No cloud backend is part of V1. The product stays on the developer's machine.
 
 ## Current development status
 
-This repository is in **early development (Phase 3)**.
+This repository is in **early development (Phase 4)**.
 
-Phase 1 scaffolded the monorepo. Phase 2 added the shared schema and redaction packages. Phase 3 adds a local loopback HTTP bridge from the Chrome extension to the VS Code extension.
+Phase 1 scaffolded the monorepo. Phase 2 added the shared schema and redaction packages. Phase 3 added a local loopback HTTP bridge. Phase 4 adds a session-scoped Chrome element picker and bounded DOM/CSS capture that submits a real `DebugSessionV1` through that bridge.
 
 The following are **not implemented yet**:
 
-- Chrome debugging capture (console, network, DOM, screenshots, element picker)
+- Screenshots
+- Console capture
+- Network capture
 - WebSocket events
-- Workspace analysis
+- Workspace analysis / project intelligence
 - AI diagnosis
-- Code patching
-
-VS Code now starts a loopback HTTP server on activation. Browser capture is still not implemented.
+- VS Code Debug Session TreeView
+- Code patching / diffs / file modification
 
 ## Architecture overview
 
@@ -34,7 +35,7 @@ The repository is a pnpm + TypeScript monorepo:
 
 | Area | Role |
 | --- | --- |
-| Chrome extension | Manifest V3 extension that can pair with VS Code and submit a fake session |
+| Chrome extension | Manifest V3 extension: pair, pick an element, submit a sanitized DebugSession |
 | VS Code extension | Owns the local loopback HTTP bridge and in-memory session store |
 | `@browser-debug-bridge/schema` | DebugSession V1 and protocol message Zod schemas |
 | `@browser-debug-bridge/redaction` | URL, DOM, text, and workspace-path sanitization |
@@ -75,21 +76,21 @@ pnpm test
 
 Full commands are in [docs/development.md](docs/development.md).
 
-## Current Phase 3 scope
+## Current Phase 4 scope
 
-- Local HTTP bridge bound to `127.0.0.1:17321` inside the VS Code extension
-- Pairing token in VS Code SecretStorage and Chrome `chrome.storage.local`
-- `POST /sessions` validates protocol + DebugSession V1 and stores a bounded in-memory list
-- Development commands and a minimal Chrome popup for pairing and fake session submit
-- Unit tests for the bridge server
+- Session-scoped element picker on the current tab (`activeTab` + `scripting`)
+- Bounded selected-element, DOM, and computed-CSS capture
+- Shared redaction + schema validation before `session.submit`
+- Existing local HTTP bridge and in-memory VS Code session store
+- Chrome unit tests for selectors, CSS allowlisting, DOM truncation, tab hashing, and session construction
 
-Browser capture, WebSocket events, AI, and patching are not part of this phase.
+Screenshots, console, network, WebSocket events, AI, and patching are not part of this phase.
 
 ## Future roadmap
 
 Later phases are expected to add, in order:
 
-1. Chrome capture (element picker, console, network, screenshots)
+1. Additional Chrome capture (console, network, screenshots)
 2. VS Code Debug Session UI
 3. Project-aware diagnosis
 4. Proposed fixes with developer approval before apply

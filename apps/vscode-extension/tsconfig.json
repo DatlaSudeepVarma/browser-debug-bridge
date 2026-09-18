@@ -1,0 +1,14 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "module": "Node16",
+    "moduleResolution": "Node16",
+    "lib": ["ES2022"],
+    "rootDir": "src",
+    "outDir": "out",
+    "declaration": false,
+    "declarationMap": false,
+    "types": ["node", "vscode"]
+  },
+  "include": ["src"]
+}

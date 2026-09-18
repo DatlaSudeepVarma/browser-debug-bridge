@@ -1,0 +1,25 @@
+{
+  "name": "browser-debug-bridge",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Browser debugging session → project-aware diagnosis → proposed code fix.",
+  "packageManager": "pnpm@10.17.1",
+  "engines": {
+    "node": ">=20",
+    "pnpm": ">=9"
+  },
+  "scripts": {
+    "build": "pnpm -r --if-present build",
+    "build:chrome": "pnpm --filter @browser-debug-bridge/chrome-extension build",
+    "build:vscode": "pnpm --filter browser-debug-bridge-vscode build",
+    "typecheck": "pnpm -r --if-present typecheck",
+    "test": "pnpm -r --if-present test",
+    "lint": "eslint apps/chrome-extension/src apps/chrome-extension/vite.config.ts apps/vscode-extension/src packages/schema/src packages/redaction/src eslint.config.mjs"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.35.0",
+    "eslint": "^9.35.0",
+    "typescript": "^5.9.2",
+    "typescript-eslint": "^8.43.0"
+  }
+}

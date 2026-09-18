@@ -1,0 +1,103 @@
+{
+  "protocolVersion": 1,
+  "type": "session.submit",
+  "requestId": "b1eebc99-9c0b-4ef8-bb6d-6bb9bd380a11",
+  "session": {
+    "schemaVersion": 1,
+    "sessionId": "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11",
+    "createdAt": "2026-09-18T16:00:00.000Z",
+    "page": {
+      "url": "https://localhost:3000/profile?id=42",
+      "title": "Profile",
+      "origin": "https://localhost:3000"
+    },
+    "browser": {
+      "name": "Chrome",
+      "version": "129.0.6668.90",
+      "extensionVersion": "0.1.0"
+    },
+    "userDescription": "The save button on the profile form does not submit.",
+    "selectedElement": {
+      "selector": "form#profile button[type='submit']",
+      "tag": "button",
+      "id": "save-profile",
+      "classes": ["primary", "submit"],
+      "role": "button",
+      "textPreview": "Save",
+      "rect": {
+        "x": 24,
+        "y": 480,
+        "width": 120,
+        "height": 40
+      },
+      "ancestorPath": [
+        { "tag": "html" },
+        { "tag": "body" },
+        { "tag": "main", "id": "content" },
+        { "tag": "form", "id": "profile", "classes": ["stack"] },
+        { "tag": "button", "id": "save-profile", "classes": ["primary", "submit"] }
+      ]
+    },
+    "dom": {
+      "outerHtmlTruncated": "<button type=\"submit\" id=\"save-profile\" class=\"primary submit\">Save</button>",
+      "htmlBytes": 78,
+      "truncated": false
+    },
+    "css": {
+      "computedSubset": {
+        "display": "inline-flex",
+        "color": "rgb(255, 255, 255)",
+        "background-color": "rgb(37, 99, 235)"
+      },
+      "matchedRuleSummaries": [
+        {
+          "selector": "button.primary",
+          "originHint": "stylesheet"
+        }
+      ]
+    },
+    "screenshot": {
+      "mime": "image/png",
+      "width": 400,
+      "height": 120,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "cropped": true
+    },
+    "console": [
+      {
+        "level": "error",
+        "message": "TypeError: Cannot read properties of undefined (reading 'id')",
+        "timestamp": "2026-09-18T16:00:01.120Z",
+        "stack": "TypeError: Cannot read properties of undefined (reading 'id')\n    at saveProfile (https://localhost:3000/profile.js:12:8)"
+      }
+    ],
+    "network": [
+      {
+        "timestamp": "2026-09-18T16:00:01.200Z",
+        "method": "POST",
+        "urlRedacted": "https://localhost:3000/api/profile",
+        "status": 500,
+        "resourceType": "fetch",
+        "error": "Internal Server Error"
+      }
+    ],
+    "hints": {
+      "framework": "react",
+      "evidence": ["data-reactroot attribute on page root"]
+    },
+    "capture": {
+      "startedAt": "2026-09-18T16:00:00.000Z",
+      "endedAt": "2026-09-18T16:00:02.000Z",
+      "tabIdHash": "0123456789abcdef0123456789abcdef",
+      "permissionsGranted": []
+    },
+    "redaction": {
+      "rulesApplied": ["url.query", "dom.password"],
+      "notes": "Fixture uses only fake, non-sensitive values."
+    },
+    "metadata": {
+      "payloadBytes": 2048,
+      "truncatedFields": []
+    }
+  }
+}

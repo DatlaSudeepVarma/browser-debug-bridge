@@ -3,6 +3,7 @@ export {
   DEBUG_SESSION_SCHEMA_VERSION,
   HexSha256Schema,
   IsoTimestampSchema,
+  PAIRING_TOKEN_PATTERN,
   PROTOCOL_LIMITS,
   PROTOCOL_VERSION,
   TabIdHashSchema,
@@ -44,17 +45,25 @@ export {
 } from "./debug-session.js";
 
 export {
+  createFakeDebugSessionV1,
+  createFakeSessionSubmission,
+} from "./fake-session.js";
+
+export {
   HealthResponseSchema,
   PairRequestSchema,
   PairResponseSchema,
   PairStateSchema,
   PairStatusSchema,
+  PairTokenRequestSchema,
+  PairTokenResponseSchema,
   ProtocolErrorCodeSchema,
   ProtocolErrorSchema,
   ProtocolMessageSchema,
   ProtocolVersionSchema,
   SessionAcknowledgementSchema,
   SessionSubmissionSchema,
+  createProtocolError,
   parseProtocolMessage,
   safeParseProtocolMessage,
   type HealthResponse,
@@ -62,6 +71,8 @@ export {
   type PairResponse,
   type PairState,
   type PairStatus,
+  type PairTokenRequest,
+  type PairTokenResponse,
   type ProtocolError,
   type ProtocolErrorCode,
   type ProtocolMessage,

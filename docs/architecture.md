@@ -27,7 +27,7 @@ V1 does not include a cloud backend, hosted API, dashboard, or database. Work st
 
 Its future job is to participate in a browser debugging session and send a sanitized session payload toward VS Code. In later phases that includes capture of debugging signals such as console output, network activity, and DOM context.
 
-Phase 1 only establishes the TypeScript + Vite + Manifest V3 foundation. It does not request debug, scripting, or host permissions, and it does not implement capture, pairing, or localhost communication.
+Phase 1 established the TypeScript + Vite + Manifest V3 foundation. Phase 3 adds pairing with the local VS Code bridge and a development popup that can submit a **fake** DebugSession. It does not request debugger, scripting, or `<all_urls>` permissions, and it does not implement capture.
 
 ## 3. VS Code extension
 
@@ -35,7 +35,7 @@ Phase 1 only establishes the TypeScript + Vite + Manifest V3 foundation. It does
 
 Its future job is to receive a debug session, inspect the open project, present a diagnosis, and propose a code fix. The developer reviews the proposal and chooses whether to apply it.
 
-Phase 1 only establishes the extension foundation and a Hello smoke-test command. It does not start a bridge server, analyze the workspace, show a Debug Session tree, call an AI provider, or modify files.
+Phase 1 established the extension foundation and a Hello smoke-test command. Phase 3 starts a loopback HTTP bridge inside the extension process, stores pairing tokens in SecretStorage, and keeps recent DebugSession payloads in memory. It does not analyze the workspace, show a Debug Session tree, call an AI provider, or modify files.
 
 ## 4. Shared packages
 
@@ -65,11 +65,19 @@ These functions do not depend on Chrome or VS Code APIs. Capture, pairing, and p
 
 There is no separate protocol-client, API, or server package in V1.
 
-## 5. Future local bridge
+## 5. Local bridge
 
-Chrome and VS Code will communicate through a **local bridge** on the developer's machine.
+Chrome and VS Code communicate through a **local HTTP bridge** owned by the VS Code extension.
 
-The bridge is a future concern. It is not a standalone app in this repository today, and Phase 1 does not implement HTTP, WebSocket, pairing, or transport code. When it is added, it remains local-first: Chrome ↔ local bridge ↔ VS Code, with no cloud hop in the V1 path.
+- Bind address: `127.0.0.1` only (never `0.0.0.0`)
+- Port: `17321` (`BRIDGE_PORT`)
+- Transport in this phase: HTTP only (no WebSocket `/events` yet)
+- Auth: `Authorization: Bearer <pairing-token>` on session endpoints
+- Pairing token: 256-bit value in VS Code `SecretStorage`, copied into Chrome `chrome.storage.local` via the development pairing command
+- Origin: browser requests must use `chrome-extension://<configured-id>`
+- Sessions: validated with `@browser-debug-bridge/schema`, stored in memory (max 20), not written to disk
+
+There is no separate Node app, cloud API, or database.
 
 ## 6. Future AI provider abstraction
 
@@ -87,4 +95,4 @@ Security is a product constraint, not a later add-on:
 - Patch path protection: generated fixes must not silently touch protected paths.
 - Human approval: diagnosis may propose a fix; only the developer applies it.
 
-Phase 1 does not implement capture or transport. Phase 2 implements the schema and redaction packages so later phases have a contract and sanitization layer without introducing a cloud service.
+Phase 3 implements the local loopback bridge, pairing, and in-memory session ingest. Capture, AI, and patching remain later phases.

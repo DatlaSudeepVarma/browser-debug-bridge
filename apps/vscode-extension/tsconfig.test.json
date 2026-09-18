@@ -5,11 +5,10 @@
     "moduleResolution": "Node16",
     "lib": ["ES2022"],
     "rootDir": "src",
-    "outDir": "out",
+    "noEmit": true,
     "declaration": false,
     "declarationMap": false,
-    "types": ["node", "vscode"]
+    "types": ["node"]
   },
-  "include": ["src"],
-  "exclude": ["src/**/*.test.ts"]
+  "include": ["src/bridge/**/*.ts"]
 }

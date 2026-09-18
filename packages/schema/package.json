@@ -16,7 +16,7 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.test.json --noEmit",
-    "test": "tsx --test src/debug-session.test.ts src/protocol.test.ts"
+    "test": "tsx --test src/debug-session.test.ts src/protocol.test.ts src/fake-session.test.ts"
   },
   "dependencies": {
     "zod": "^3.25.76"

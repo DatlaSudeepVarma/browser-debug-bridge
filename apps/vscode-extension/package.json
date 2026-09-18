@@ -3,13 +3,14 @@
   "displayName": "Browser Debug Bridge",
   "version": "0.1.0",
   "private": true,
+  "type": "module",
   "description": "Browser debugging session → project-aware diagnosis → proposed code fix.",
   "publisher": "browser-debug-bridge",
   "engines": {
     "vscode": "^1.90.0"
   },
   "categories": ["Other"],
-  "activationEvents": ["onCommand:browserDebugBridge.hello"],
+  "activationEvents": ["onStartupFinished"],
   "main": "./out/extension.js",
   "contributes": {
     "commands": [
@@ -17,18 +18,52 @@
         "command": "browserDebugBridge.hello",
         "title": "Hello",
         "category": "Browser Debug Bridge"
+      },
+      {
+        "command": "browserDebugBridge.showPairingCode",
+        "title": "Show Pairing Code",
+        "category": "Browser Debug Bridge"
+      },
+      {
+        "command": "browserDebugBridge.startLocalBridge",
+        "title": "Start Local Bridge",
+        "category": "Browser Debug Bridge"
+      },
+      {
+        "command": "browserDebugBridge.stopLocalBridge",
+        "title": "Stop Local Bridge",
+        "category": "Browser Debug Bridge"
+      },
+      {
+        "command": "browserDebugBridge.createTestSession",
+        "title": "Create Test Session",
+        "category": "Browser Debug Bridge"
       }
-    ]
+    ],
+    "configuration": {
+      "title": "Browser Debug Bridge",
+      "properties": {
+        "browserDebugBridge.chromeExtensionId": {
+          "type": "string",
+          "default": "",
+          "description": "Stable Chrome extension ID used to validate Origin headers from the unpacked/published extension. Copy it from chrome://extensions after loading the extension. Browser requests are rejected until this is set. Requests without an Origin header are allowed for local VS Code/curl testing only."
+        }
+      }
+    }
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "watch": "tsc -p tsconfig.json --watch",
-    "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "node -e \"console.log('No tests in this package')\""
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.test.json --noEmit",
+    "test": "tsx --test src/bridge/http-server.test.ts"
+  },
+  "dependencies": {
+    "@browser-debug-bridge/schema": "workspace:*"
   },
   "devDependencies": {
     "@types/node": "^24.3.0",
     "@types/vscode": "^1.90.0",
+    "tsx": "^4.20.5",
     "typescript": "^5.9.2"
   }
 }

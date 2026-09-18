@@ -50,9 +50,12 @@ export const PROTOCOL_LIMITS = {
   clientName: 128,
   clientVersion: 64,
   pairingCode: 16,
+  pairingToken: 64,
   errorCode: 64,
   errorMessage: 512,
 } as const;
+
+export const PAIRING_TOKEN_PATTERN = /^[a-f0-9]{64}$/;
 
 const ISO_TIMESTAMP_PATTERN =
   /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?(?:Z|[+-]\d{2}:\d{2})$/;

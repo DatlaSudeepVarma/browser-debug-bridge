@@ -22,6 +22,10 @@ importers:
         version: 8.70.0(eslint@9.39.5)(typescript@5.9.3)
 
   apps/chrome-extension:
+    dependencies:
+      '@browser-debug-bridge/schema':
+        specifier: workspace:*
+        version: link:../../packages/schema
     devDependencies:
       '@types/chrome':
         specifier: ^0.1.4
@@ -37,6 +41,10 @@ importers:
         version: 7.3.6(@types/node@24.13.5)(tsx@4.23.13)
 
   apps/vscode-extension:
+    dependencies:
+      '@browser-debug-bridge/schema':
+        specifier: workspace:*
+        version: link:../../packages/schema
     devDependencies:
       '@types/node':
         specifier: ^24.3.0
@@ -44,6 +52,9 @@ importers:
       '@types/vscode':
         specifier: ^1.90.0
         version: 1.138.0
+      tsx:
+        specifier: ^4.20.5
+        version: 4.23.13
       typescript:
         specifier: ^5.9.2
         version: 5.9.3

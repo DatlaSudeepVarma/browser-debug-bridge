@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Browser Debug Bridge</title>
+    <style>
+      body {
+        font-family: sans-serif;
+        margin: 12px;
+        width: 280px;
+      }
+      label,
+      input,
+      button,
+      pre {
+        display: block;
+        width: 100%;
+        box-sizing: border-box;
+        margin: 6px 0;
+      }
+      pre {
+        white-space: pre-wrap;
+        min-height: 3em;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Debug Bridge</h1>
+    <p>Development pairing only. Capture is not implemented yet.</p>
+    <label for="token">Pairing token</label>
+    <input id="token" type="password" autocomplete="off" />
+    <button id="pair" type="button">Pair with VS Code</button>
+    <button id="health" type="button">Check health</button>
+    <button id="submit" type="button">Submit test session</button>
+    <pre id="status">Ready.</pre>
+    <script type="module" src="/src/popup.ts"></script>
+  </body>
+</html>

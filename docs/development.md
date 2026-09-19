@@ -83,6 +83,8 @@ The VS Code extension owns an HTTP server bound to **`127.0.0.1:17321`**. It sta
 | GET | `/pair-status` | public | `{ paired: boolean }` (never the token) |
 | POST | `/pair` | unauthenticated | Submit the pairing token |
 | POST | `/sessions` | Bearer token | Submit a `session.submit` payload |
+| POST | `/sessions/:sessionId/screenshot` | Bearer token | Raw JPEG bytes for that session id |
+| DELETE | `/sessions/:sessionId/screenshot` | Bearer token | Drop a pending/bound screenshot |
 | POST | `/sessions/:sessionId/ack` | Bearer token | Acknowledge a stored session |
 
 There is no `/events` WebSocket in this phase.
@@ -93,9 +95,10 @@ There is no `/events` WebSocket in this phase.
 - Browser requests must send `Origin: chrome-extension://<id>` matching `browserDebugBridge.chromeExtensionId`.
 - Requests **without** an `Origin` header are allowed for local VS Code/curl testing. That does not relax browser Origin checks.
 - Session endpoints require `Authorization: Bearer <token>`.
-- Request bodies larger than 5 MB are rejected with HTTP 413.
-- Debug sessions stay in memory (max 20) and are not written to disk.
-- Pairing tokens are never logged, returned from `/health` or `/pair-status`, or stored in source.
+- JSON request bodies larger than 5 MB are rejected with HTTP 413.
+- JPEG screenshot bodies larger than 1 MB are rejected with HTTP 413.
+- Debug sessions and screenshot artifacts stay in memory (max 20 each) and are not written to disk.
+- Pairing tokens and screenshot bytes are never logged.
 
 ### Configure the Chrome origin
 
@@ -163,15 +166,15 @@ Load the unpacked extension in Chrome:
 3. Click **Load unpacked**
 4. Select `apps/chrome-extension/dist`
 
-The built folder must contain `manifest.json`, `background.js`, `popup.html`, and `content-script.js`. `content-script.js` is produced by a second Vite IIFE build and is injected only when the user starts a debug session.
+The built folder must contain `manifest.json`, `background.js`, `popup.html`, `content-script.js`, and `console-hook.js`. `content-script.js` and `console-hook.js` are produced by extra Vite IIFE builds and are injected only when the user starts a debug session (`console-hook.js` into the page MAIN world).
 
-### Chrome permissions (Phase 4)
+### Chrome permissions (Phase 4–5B)
 
 | Permission | Why it exists |
 | --- | --- |
 | `storage` | Pairing token in `chrome.storage.local`; capture status in `chrome.storage.session` |
 | `activeTab` | Reach only the tab where the user clicked the extension action |
-| `scripting` | Inject the session-scoped picker/content script into that tab |
+| `scripting` | Inject the session-scoped picker/content script and MAIN-world console hook |
 | `host_permissions`: `http://127.0.0.1:17321/*` | Talk to the existing local VS Code bridge |
 
 Not requested: `<all_urls>`, `debugger`, `webRequest`, `cookies`, `tabs`.
@@ -196,7 +199,7 @@ For rebuild-on-change during popup/background work:
 pnpm --filter @browser-debug-bridge/chrome-extension dev
 ```
 
-That watch build does not rebuild `content-script.js`. Use `pnpm build:chrome` after picker/content-script changes.
+That watch build does not rebuild `content-script.js` or `console-hook.js`. Use `pnpm build:chrome` after picker/content-script/console-hook changes.
 
 Reload the extension on `chrome://extensions` after each rebuild.
 
@@ -246,4 +249,33 @@ Use the fixture page at `apps/chrome-extension/test-page/index.html`. It contain
 9. Start capture again, press Escape, and confirm the overlay disappears.
 10. Start capture, then reload the tab, and confirm the picker is gone.
 
-Do not use real credentials. This phase does not capture screenshots, console, or network.
+Do not use real credentials.
+
+### Phase 5A screenshot smoke test
+
+The same fixture page includes a small `tiny` span, the medium **Buy now** button, and a large dashed panel.
+
+1. Pair Chrome with VS Code and open the fixture page.
+2. Start a debug session, select **tiny**, submit.
+3. Confirm VS Code logs `Session received` and `Screenshot received` (byte count only, no image data).
+4. Confirm the DebugSession `screenshot` field is JPEG metadata: `cropped: true`, real width/height, SHA-256, not 1×1 placeholders.
+5. Repeat with the large panel. The JPEG should be proportionally scaled if it exceeds 1600×1200 and must not include the orange picker overlay.
+6. If practical, select an element that is partly off-screen. Only the visible region is captured; the page is not scrolled.
+7. Reload the Extension Development Host and confirm in-memory screenshots are gone.
+
+Do not use real secrets. Screenshots are not redacted. Network capture is not implemented.
+
+### Phase 5B console smoke test
+
+The fixture page includes buttons that emit fake `console.log` / `warn` / `error`, a thrown `Error`, and an unhandled rejection (`token=fake-token-123`, `api_key=fake-api-key-456`).
+
+1. Pair Chrome with VS Code and open the fixture page.
+2. Start a debug session, then click the console buttons (and throw / reject if desired).
+3. Select an element and submit.
+4. Confirm VS Code received `console[]` entries (levels, ISO timestamps, bounded stacks).
+5. Confirm at most 50 entries and that `fake-token-123` / `fake-api-key-456` are `[REDACTED]`.
+6. Confirm `[page error]` / `[unhandled rejection]` prefixes for runtime events if those buttons were used.
+7. Cancel a new session, click a console button, and confirm that message is not attached to a later session.
+8. Reload during capture and confirm the old session does not continue on the new page.
+
+A real Chrome + Extension Development Host is required for this path. Isolated-world unit tests do not load `chrome.tabs` or the MAIN-world hook.

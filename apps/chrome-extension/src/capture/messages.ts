@@ -39,6 +39,11 @@ export interface PageCapturePayload {
     name: string;
     version: string;
   };
+  viewport: {
+    width: number;
+    height: number;
+    devicePixelRatio: number;
+  };
   crossOriginStylesheetsSkipped: boolean;
   truncatedFields: string[];
 }
@@ -54,6 +59,16 @@ export interface CaptureState {
   lastSelector?: string;
 }
 
+export type ConsoleEventSource = "console" | "page-error" | "unhandled-rejection";
+
+export interface ConsoleEventPayload {
+  level: "debug" | "log" | "info" | "warn" | "error";
+  message: string;
+  timestamp: string;
+  stack?: string;
+  source: ConsoleEventSource;
+}
+
 export type RuntimeMessage =
   | { type: "start-capture" }
   | { type: "cancel-capture" }
@@ -62,6 +77,7 @@ export type RuntimeMessage =
   | { type: "picker-ready" }
   | { type: "picker-failed"; error: string }
   | { type: "capture-cancelled" }
+  | { type: "console-event"; entry: ConsoleEventPayload }
   | {
       type: "submit-capture";
       payload: PageCapturePayload;
@@ -94,8 +110,30 @@ export function isPageCapturePayload(value: unknown): value is PageCapturePayloa
     Array.isArray(value.matchedRuleSummaries) &&
     isRecord(value.page) &&
     isRecord(value.browser) &&
+    isRecord(value.viewport) &&
+    typeof value.viewport.width === "number" &&
+    typeof value.viewport.height === "number" &&
+    typeof value.viewport.devicePixelRatio === "number" &&
     typeof value.crossOriginStylesheetsSkipped === "boolean" &&
     Array.isArray(value.truncatedFields)
+  );
+}
+
+const CONSOLE_LEVELS = new Set(["debug", "log", "info", "warn", "error"]);
+const CONSOLE_SOURCES = new Set(["console", "page-error", "unhandled-rejection"]);
+
+export function isConsoleEventPayload(value: unknown): value is ConsoleEventPayload {
+  if (!isRecord(value)) {
+    return false;
+  }
+  return (
+    typeof value.level === "string" &&
+    CONSOLE_LEVELS.has(value.level) &&
+    typeof value.message === "string" &&
+    typeof value.timestamp === "string" &&
+    (value.stack === undefined || typeof value.stack === "string") &&
+    typeof value.source === "string" &&
+    CONSOLE_SOURCES.has(value.source)
   );
 }
 
@@ -126,6 +164,10 @@ export function parseRuntimeMessage(value: unknown): RuntimeMessage | undefined 
             payload: value.payload,
             userDescription: value.userDescription,
           }
+        : undefined;
+    case "console-event":
+      return isConsoleEventPayload(value.entry)
+        ? { type: "console-event", entry: value.entry }
         : undefined;
     default:
       return undefined;

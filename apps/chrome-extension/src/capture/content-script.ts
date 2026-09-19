@@ -1,5 +1,6 @@
 import { captureElement } from "./capture.js";
-import { CAPTURE_FLAG_KEY, CAPTURE_PORT_NAME } from "./limits.js";
+import { startConsoleCapture } from "./console/capture.js";
+import { CAPTURE_FLAG_KEY, CAPTURE_PORT_NAME, SCREENSHOT_SETTLE_MS } from "./limits.js";
 import type { RuntimeResponse } from "./messages.js";
 import { startPicker } from "./picker.js";
 
@@ -27,9 +28,24 @@ function sendMessage(message: object): Promise<RuntimeResponse | undefined> {
   });
 }
 
+function publishConsoleEvent(entry: {
+  level: "debug" | "log" | "info" | "warn" | "error";
+  message: string;
+  timestamp: string;
+  stack?: string;
+  source: "console" | "page-error" | "unhandled-rejection";
+}): void {
+  chrome.runtime.sendMessage({ type: "console-event", entry }, () => {
+    void chrome.runtime.lastError;
+  });
+}
+
 function startCaptureMode(): void {
   const port = chrome.runtime.connect({ name: CAPTURE_PORT_NAME });
   let stopped = false;
+  const consoleCapture = startConsoleCapture({
+    publish: publishConsoleEvent,
+  });
 
   function stop(): void {
     if (stopped) {
@@ -37,6 +53,7 @@ function startCaptureMode(): void {
     }
     stopped = true;
     globalState[CAPTURE_FLAG_KEY] = false;
+    consoleCapture.stop();
     picker.stop();
     try {
       port.disconnect();
@@ -62,12 +79,17 @@ function startCaptureMode(): void {
       picker.showDescriptionPrompt({
         selectorLabel: payload.selector,
         onSubmit(description) {
-          picker.showStatus("Submitting captured session…");
-          void sendMessage({
-            type: "submit-capture",
-            payload,
-            userDescription: description,
-          }).then((response) => {
+          picker.hideVisuals();
+          consoleCapture.stop();
+          void (async () => {
+            await new Promise<void>((resolve) => {
+              window.setTimeout(resolve, SCREENSHOT_SETTLE_MS);
+            });
+            const response = await sendMessage({
+              type: "submit-capture",
+              payload,
+              userDescription: description,
+            });
             if (response?.ok === true) {
               const sessionId = response.sessionId ?? "accepted";
               picker.showStatus(`Session submitted: ${sessionId}`);
@@ -78,7 +100,7 @@ function startCaptureMode(): void {
               response?.error ?? "The captured session was not sent.",
               "error",
             );
-          });
+          })();
         },
         onCancel() {
           void sendMessage({ type: "capture-cancelled" });

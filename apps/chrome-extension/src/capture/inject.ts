@@ -28,6 +28,14 @@ export async function injectContentScript(tabId: number): Promise<void> {
   });
 }
 
+export async function injectConsoleHook(tabId: number): Promise<void> {
+  await chrome.scripting.executeScript({
+    target: { tabId },
+    world: "MAIN",
+    files: ["console-hook.js"],
+  });
+}
+
 export async function startCaptureOnActiveTab(): Promise<
   { ok: true } | { ok: false; error: string }
 > {
@@ -54,6 +62,12 @@ export async function startCaptureOnActiveTab(): Promise<
     await injectContentScript(tab.id);
   } catch {
     return { ok: false, error: ERRORS.injectionFailed };
+  }
+
+  try {
+    await injectConsoleHook(tab.id);
+  } catch {
+    // Isolated-world error listeners still run if the MAIN-world hook cannot install.
   }
 
   await setCaptureState({

@@ -2,16 +2,20 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import {
   PROTOCOL_VERSION,
   PairTokenRequestSchema,
+  SCREENSHOT_LIMITS,
+  ScreenshotAcknowledgementSchema,
   SessionAcknowledgementSchema,
   SessionSubmissionSchema,
   UuidSchema,
   createProtocolError,
+  type DebugSessionV1,
   type ProtocolError,
   type ProtocolErrorCode,
 } from "@browser-debug-bridge/schema";
 import { BODY_WARN_BYTES, BRIDGE_SERVICE_NAME, MAX_BODY_BYTES } from "./constants.js";
-import { readBearerToken, timingSafeEqualText } from "./crypto.js";
+import { isJpegBytes, readBearerToken, sha256Hex, timingSafeEqualText } from "./crypto.js";
 import type { BridgeLogger } from "./logger.js";
+import type { ScreenshotStore } from "./screenshot-store.js";
 import type { SessionStore } from "./session-store.js";
 
 export interface BridgeHandlerOptions {
@@ -19,6 +23,7 @@ export interface BridgeHandlerOptions {
   expectedChromeExtensionId: string;
   pairingToken: string;
   store: SessionStore;
+  screenshots: ScreenshotStore;
   logger: BridgeLogger;
   maxBodyBytes?: number;
   bodyWarnBytes?: number;
@@ -29,6 +34,11 @@ interface PairingState {
 }
 
 const SESSION_ACK_PATH = /^\/sessions\/([^/]+)\/ack$/;
+const SESSION_SCREENSHOT_PATH = /^\/sessions\/([^/]+)\/screenshot$/;
+
+function sessionRequiresJpegBytes(session: DebugSessionV1): boolean {
+  return session.screenshot.mime === "image/jpeg";
+}
 
 function chromeExtensionOrigin(extensionId: string): string {
   return `chrome-extension://${extensionId}`;
@@ -87,7 +97,7 @@ function sendJson(
   ) {
     headers["Access-Control-Allow-Origin"] = origin;
     headers.Vary = "Origin";
-    headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS";
+    headers["Access-Control-Allow-Methods"] = "GET, POST, DELETE, OPTIONS";
     headers["Access-Control-Allow-Headers"] = "Authorization, Content-Type";
     headers["Access-Control-Max-Age"] = "600";
   }
@@ -244,6 +254,23 @@ export function createBridgeHandler(options: BridgeHandlerOptions): {
         return;
       }
 
+      const screenshotMatch = SESSION_SCREENSHOT_PATH.exec(path);
+      if (screenshotMatch) {
+        const sessionId = screenshotMatch[1];
+        if (sessionId === undefined) {
+          sendError(req, res, 400, "INVALID_SESSION", "A session id is required.", extensionId);
+          return;
+        }
+        if (method === "POST") {
+          await handleScreenshotUpload(req, res, extensionId, sessionId);
+          return;
+        }
+        if (method === "DELETE") {
+          await handleScreenshotDelete(req, res, extensionId, sessionId);
+          return;
+        }
+      }
+
       const ackMatch = SESSION_ACK_PATH.exec(path);
       if (method === "POST" && ackMatch) {
         const sessionId = ackMatch[1];
@@ -356,6 +383,10 @@ export function createBridgeHandler(options: BridgeHandlerOptions): {
         payload !== null &&
         "type" in payload &&
         payload.type === "session.submit";
+      const pendingId = peekSessionId(payload);
+      if (pendingId !== undefined) {
+        options.screenshots.delete(pendingId);
+      }
       sendError(
         req,
         res,
@@ -366,8 +397,30 @@ export function createBridgeHandler(options: BridgeHandlerOptions): {
       );
       return;
     }
-    options.store.add(parsed.data.session);
-    options.logger.info(`Session received: ${parsed.data.session.sessionId}`);
+    const session = parsed.data.session;
+    if (sessionRequiresJpegBytes(session)) {
+      const artifact = options.screenshots.get(session.sessionId);
+      if (artifact === undefined || artifact.sha256 !== session.screenshot.sha256) {
+        options.screenshots.delete(session.sessionId);
+        options.logger.info("Session rejected: screenshot missing or hash mismatch");
+        sendError(
+          req,
+          res,
+          400,
+          "INVALID_SESSION",
+          "JPEG screenshot bytes must be uploaded before the session metadata.",
+          extensionId,
+          parsed.data.requestId,
+        );
+        return;
+      }
+    }
+    const evicted = options.store.add(session);
+    for (const evictedId of evicted) {
+      options.screenshots.delete(evictedId);
+    }
+    options.screenshots.bind(session.sessionId);
+    options.logger.info(`Session received: ${session.sessionId}`);
     sendJson(
       req,
       res,
@@ -381,6 +434,133 @@ export function createBridgeHandler(options: BridgeHandlerOptions): {
       },
       extensionId,
     );
+  }
+
+  function peekSessionId(payload: unknown): string | undefined {
+    if (typeof payload !== "object" || payload === null || !("session" in payload)) {
+      return undefined;
+    }
+    const session = payload.session;
+    if (typeof session !== "object" || session === null || !("sessionId" in session)) {
+      return undefined;
+    }
+    return typeof session.sessionId === "string" ? session.sessionId : undefined;
+  }
+
+  function sendScreenshotAck(
+    req: IncomingMessage,
+    res: ServerResponse,
+    extensionId: string,
+    sessionId: string,
+    sha256: string,
+    bytes: number,
+  ): void {
+    const ack = ScreenshotAcknowledgementSchema.parse({
+      protocolVersion: PROTOCOL_VERSION,
+      type: "screenshot.ack",
+      sessionId,
+      accepted: true,
+      sha256,
+      bytes,
+    });
+    sendJson(req, res, 200, ack, extensionId);
+  }
+
+  async function handleScreenshotUpload(
+    req: IncomingMessage,
+    res: ServerResponse,
+    extensionId: string,
+    sessionId: string,
+  ): Promise<void> {
+    if (!requireAuthorized(req, res, extensionId)) {
+      return;
+    }
+    const idResult = UuidSchema.safeParse(sessionId);
+    if (!idResult.success) {
+      sendError(req, res, 400, "INVALID_SESSION", "sessionId must be a UUID.", extensionId);
+      return;
+    }
+    const contentType = headerValue(req.headers["content-type"])?.split(";")[0]?.trim().toLowerCase();
+    if (contentType !== "image/jpeg") {
+      sendError(
+        req,
+        res,
+        400,
+        "INVALID_PROTOCOL",
+        "Screenshot uploads must use Content-Type image/jpeg.",
+        extensionId,
+      );
+      return;
+    }
+    const body = await readBody(
+      req,
+      SCREENSHOT_LIMITS.maxBytes,
+      SCREENSHOT_LIMITS.maxBytes,
+      options.logger,
+    );
+    if (!body.ok) {
+      sendError(
+        req,
+        res,
+        413,
+        "PAYLOAD_TOO_LARGE",
+        "Screenshot exceeds the 1 MB limit.",
+        extensionId,
+      );
+      return;
+    }
+    if (!isJpegBytes(body.buffer)) {
+      sendError(req, res, 400, "INVALID_PROTOCOL", "Screenshot bytes must be JPEG.", extensionId);
+      return;
+    }
+    const digest = sha256Hex(body.buffer);
+    const existingSession = options.store.get(idResult.data);
+    if (
+      existingSession !== undefined &&
+      existingSession.session.screenshot.sha256 !== digest
+    ) {
+      sendError(
+        req,
+        res,
+        400,
+        "INVALID_SESSION",
+        "Screenshot hash does not match the stored session metadata.",
+        extensionId,
+      );
+      return;
+    }
+    options.screenshots.put({
+      sessionId: idResult.data,
+      mime: "image/jpeg",
+      bytes: body.buffer,
+      sha256: digest,
+      bound: existingSession !== undefined,
+      receivedAt: Date.now(),
+    });
+    options.logger.info(`Screenshot received: ${idResult.data} (${String(body.buffer.length)} bytes)`);
+    sendScreenshotAck(req, res, extensionId, idResult.data, digest, body.buffer.length);
+  }
+
+  async function handleScreenshotDelete(
+    req: IncomingMessage,
+    res: ServerResponse,
+    extensionId: string,
+    sessionId: string,
+  ): Promise<void> {
+    if (!requireAuthorized(req, res, extensionId)) {
+      return;
+    }
+    const idResult = UuidSchema.safeParse(sessionId);
+    if (!idResult.success) {
+      sendError(req, res, 400, "INVALID_SESSION", "sessionId must be a UUID.", extensionId);
+      return;
+    }
+    const existing = options.screenshots.delete(idResult.data);
+    if (existing === undefined) {
+      sendError(req, res, 404, "SESSION_NOT_FOUND", "No screenshot exists for that id.", extensionId);
+      return;
+    }
+    sendScreenshotAck(req, res, extensionId, idResult.data, existing.sha256, existing.bytes.length);
   }
 
   async function handleAck(

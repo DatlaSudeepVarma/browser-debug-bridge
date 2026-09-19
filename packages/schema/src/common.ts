@@ -46,6 +46,10 @@ export const DEBUG_SESSION_LIMITS = {
   payloadBytes: 10 * 1024 * 1024,
 } as const;
 
+export const MAX_CONSOLE_ENTRIES = DEBUG_SESSION_LIMITS.consoleEntries;
+export const MAX_CONSOLE_MESSAGE_LENGTH = DEBUG_SESSION_LIMITS.consoleMessage;
+export const MAX_CONSOLE_STACK_LENGTH = DEBUG_SESSION_LIMITS.consoleStack;
+
 export const PROTOCOL_LIMITS = {
   clientName: 128,
   clientVersion: 64,
@@ -53,6 +57,13 @@ export const PROTOCOL_LIMITS = {
   pairingToken: 64,
   errorCode: 64,
   errorMessage: 512,
+} as const;
+
+export const SCREENSHOT_LIMITS = {
+  maxWidth: 1600,
+  maxHeight: 1200,
+  maxBytes: 1 * 1024 * 1024,
+  jpegQuality: 0.8,
 } as const;
 
 export const PAIRING_TOKEN_PATTERN = /^[a-f0-9]{64}$/;

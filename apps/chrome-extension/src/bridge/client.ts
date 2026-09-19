@@ -3,11 +3,13 @@ import {
   PairStatusSchema,
   PairTokenResponseSchema,
   ProtocolErrorSchema,
+  ScreenshotAcknowledgementSchema,
   SessionAcknowledgementSchema,
   createFakeSessionSubmission,
   type HealthResponse,
   type PairStatus,
   type PairTokenResponse,
+  type ScreenshotAcknowledgement,
   type SessionAcknowledgement,
   type SessionSubmission,
 } from "@browser-debug-bridge/schema";
@@ -85,6 +87,47 @@ export async function submitSession(
   const json = await readJson(response);
   await throwIfProtocolError(response, json);
   return SessionAcknowledgementSchema.parse(json);
+}
+
+export async function submitScreenshot(
+  sessionId: string,
+  bytes: Uint8Array,
+): Promise<ScreenshotAcknowledgement> {
+  const token = await loadPairingToken();
+  if (token === undefined) {
+    throw new BridgeClientError("Not paired with the local VS Code bridge.", 401, "UNPAIRED");
+  }
+  const copy = new ArrayBuffer(bytes.byteLength);
+  new Uint8Array(copy).set(bytes);
+  const response = await fetch(`${BRIDGE_BASE_URL}/sessions/${sessionId}/screenshot`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "image/jpeg",
+      Authorization: `Bearer ${token}`,
+    },
+    body: copy,
+  });
+  const json = await readJson(response);
+  await throwIfProtocolError(response, json);
+  return ScreenshotAcknowledgementSchema.parse(json);
+}
+
+export async function deleteScreenshot(sessionId: string): Promise<void> {
+  const token = await loadPairingToken();
+  if (token === undefined) {
+    throw new BridgeClientError("Not paired with the local VS Code bridge.", 401, "UNPAIRED");
+  }
+  const response = await fetch(`${BRIDGE_BASE_URL}/sessions/${sessionId}/screenshot`, {
+    method: "DELETE",
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+  });
+  if (response.status === 404) {
+    return;
+  }
+  const json = await readJson(response);
+  await throwIfProtocolError(response, json);
 }
 
 export async function submitFakeSession(): Promise<SessionAcknowledgement> {

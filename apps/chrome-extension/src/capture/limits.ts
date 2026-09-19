@@ -26,6 +26,13 @@ export const CAPTURE_LIMITS = {
   computedStyleValue: 512,
   matchedRuleSummaries: 32,
   matchedRuleOriginHint: 128,
+  consoleEntries: 50,
+  consoleMessage: 4096,
+  consoleStack: 8192,
+  networkEntries: 100,
+  networkUrl: 2048,
+  networkError: 512,
+  networkResourceType: 64,
   hintsEvidence: 16,
   hintsEvidenceItem: 512,
   tabIdHash: 64,
@@ -98,8 +105,6 @@ export const CAPTURE_PORT_NAME = "bdb-capture";
 export const CAPTURE_STATE_STORAGE_KEY = "browserDebugBridge.captureState";
 export const TAB_ID_SALT_STORAGE_KEY = "browserDebugBridge.tabIdSalt";
 export const CAPTURE_FLAG_KEY = "__bdbCaptureRunning";
-
-export const PLACEHOLDER_SCREENSHOT_SHA256 =
-  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
+export const SCREENSHOT_SETTLE_MS = 80;
 
 export const CAPTURE_PERMISSIONS_USED = ["activeTab", "scripting"] as const;

@@ -13,6 +13,7 @@ export interface DescriptionPromptOptions {
 
 export interface PickerController {
   stop(): void;
+  hideVisuals(): void;
   showDescriptionPrompt(options: DescriptionPromptOptions): void;
   showStatus(message: string, kind?: "info" | "error"): void;
 }
@@ -211,8 +212,18 @@ export function startPicker(handlers: PickerHandlers): PickerController {
 
   return {
     stop,
+    hideVisuals() {
+      if (stopped) {
+        return;
+      }
+      selecting = false;
+      overlay.style.display = "none";
+      shadow.querySelector(".panel")?.remove();
+      host.style.visibility = "hidden";
+    },
     showDescriptionPrompt(options) {
       selecting = false;
+      host.style.visibility = "visible";
       const panel = showPanel();
       const title = document.createElement("p");
       title.textContent = "What is wrong with this element?";
@@ -244,6 +255,7 @@ export function startPicker(handlers: PickerHandlers): PickerController {
     },
     showStatus(message, kind = "info") {
       selecting = false;
+      host.style.visibility = "visible";
       const panel = showPanel();
       panel.classList.toggle("error", kind === "error");
       const text = document.createElement("p");

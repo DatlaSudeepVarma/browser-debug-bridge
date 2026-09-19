@@ -4,17 +4,20 @@ import {
   safeParseDebugSession,
   safeParseProtocolMessage,
   type DebugSessionV1,
+  type ScreenshotMetadata,
   type SessionSubmission,
 } from "@browser-debug-bridge/schema";
 import { redactSensitiveText, redactUrl } from "@browser-debug-bridge/redaction";
 import { normalizeUserDescription } from "./capture.js";
+import type { BuiltConsoleEntry } from "./console/entries.js";
+import { MAX_CONSOLE_ENTRIES } from "./console/limits.js";
+import { redactConsoleEntry } from "./console/redact.js";
+import type { BuiltNetworkEntry } from "./network/entries.js";
+import { MAX_NETWORK_ENTRIES } from "./network/limits.js";
+import { redactNetworkEntry } from "./network/redact.js";
 import { filterComputedSubset } from "./css.js";
 import { utf8ByteLength } from "./dom.js";
-import {
-  CAPTURE_LIMITS,
-  CAPTURE_PERMISSIONS_USED,
-  PLACEHOLDER_SCREENSHOT_SHA256,
-} from "./limits.js";
+import { CAPTURE_LIMITS, CAPTURE_PERMISSIONS_USED } from "./limits.js";
 import type { PageCapturePayload } from "./messages.js";
 import { boundClasses, safeElementId } from "./selectors.js";
 
@@ -27,6 +30,9 @@ export interface SessionBuildInput {
   endedAt: string;
   tabIdHash: string;
   extensionVersion: string;
+  screenshot: ScreenshotMetadata;
+  consoleEntries?: BuiltConsoleEntry[];
+  networkEntries?: BuiltNetworkEntry[];
   permissionsGranted?: string[];
 }
 
@@ -46,8 +52,18 @@ function formatValidationError(path: ReadonlyArray<PropertyKey>): string {
   return `The captured session was invalid (${field}) and was not sent.`;
 }
 
-function evidenceFor(payload: PageCapturePayload): string[] {
-  const evidence = ["element picker capture"];
+function evidenceFor(
+  payload: PageCapturePayload,
+  consoleCount: number,
+  networkCount: number,
+): string[] {
+  const evidence = ["element picker capture", "cropped jpeg screenshot"];
+  if (consoleCount > 0) {
+    evidence.push("session-scoped console capture");
+  }
+  if (networkCount > 0) {
+    evidence.push("session-scoped network failure metadata");
+  }
   if (payload.crossOriginStylesheetsSkipped) {
     evidence.push("cross-origin stylesheets skipped");
   }
@@ -59,6 +75,14 @@ function evidenceFor(payload: PageCapturePayload): string[] {
     .slice(0, CAPTURE_LIMITS.hintsEvidence);
 }
 
+function sanitizeConsoleEntries(entries: BuiltConsoleEntry[]): BuiltConsoleEntry[] {
+  return entries.map(redactConsoleEntry).slice(-MAX_CONSOLE_ENTRIES);
+}
+
+function sanitizeNetworkEntries(entries: BuiltNetworkEntry[]): BuiltNetworkEntry[] {
+  return entries.map(redactNetworkEntry).slice(-MAX_NETWORK_ENTRIES);
+}
+
 export function buildDebugSession(input: SessionBuildInput): SessionBuildResult {
   const payload = input.payload;
   const pageUrl = clip(redactUrl(payload.page.url), CAPTURE_LIMITS.pageUrl);
@@ -68,10 +92,26 @@ export function buildDebugSession(input: SessionBuildInput): SessionBuildResult 
     CAPTURE_LIMITS.outerHtml,
   );
   const id = safeElementId(payload.id);
+  const consoleEntries = sanitizeConsoleEntries(input.consoleEntries ?? []);
+  const networkEntries = sanitizeNetworkEntries(input.networkEntries ?? []);
   const truncatedFields = [...payload.truncatedFields].slice(
     0,
     CAPTURE_LIMITS.truncatedFields,
   );
+  if (
+    (input.consoleEntries?.length ?? 0) > MAX_CONSOLE_ENTRIES &&
+    !truncatedFields.includes("console") &&
+    truncatedFields.length < CAPTURE_LIMITS.truncatedFields
+  ) {
+    truncatedFields.push("console");
+  }
+  if (
+    (input.networkEntries?.length ?? 0) > MAX_NETWORK_ENTRIES &&
+    !truncatedFields.includes("network") &&
+    truncatedFields.length < CAPTURE_LIMITS.truncatedFields
+  ) {
+    truncatedFields.push("network");
+  }
 
   const candidate = {
     schemaVersion: 1,
@@ -121,17 +161,11 @@ export function buildDebugSession(input: SessionBuildInput): SessionBuildResult 
         CAPTURE_LIMITS.matchedRuleSummaries,
       ),
     },
-    screenshot: {
-      mime: "image/png" as const,
-      width: 1,
-      height: 1,
-      sha256: PLACEHOLDER_SCREENSHOT_SHA256,
-      cropped: false,
-    },
-    console: [],
-    network: [],
+    screenshot: input.screenshot,
+    console: consoleEntries,
+    network: networkEntries,
     hints: {
-      evidence: evidenceFor(payload),
+      evidence: evidenceFor(payload, consoleEntries.length, networkEntries.length),
     },
     capture: {
       startedAt: input.startedAt,
@@ -143,9 +177,9 @@ export function buildDebugSession(input: SessionBuildInput): SessionBuildResult 
       ),
     },
     redaction: {
-      rulesApplied: ["url", "dom", "text", "user-description"],
+      rulesApplied: ["url", "dom", "text", "user-description", "console-text", "network-url"],
       notes:
-        "Phase 4 element capture. Screenshot bytes, console, and network are not captured.",
+        "Phase 5C session-scoped network failure metadata. URLs are redacted. Request/response bodies, headers, and cookies are not captured. Console redaction is heuristic. Screenshot pixels are not redacted. This is not a HAR recorder.",
     },
     metadata: {
       payloadBytes: 0,

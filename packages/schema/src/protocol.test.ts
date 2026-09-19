@@ -55,6 +55,14 @@ describe("protocol messages", () => {
       type: "pair.token.result",
       paired: true,
     });
+    parseProtocolMessage({
+      protocolVersion: 1,
+      type: "screenshot.ack",
+      sessionId: "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11",
+      accepted: true,
+      sha256: "ab".repeat(32),
+      bytes: 128,
+    });
   });
 
   it("rejects an invalid protocol version", () => {

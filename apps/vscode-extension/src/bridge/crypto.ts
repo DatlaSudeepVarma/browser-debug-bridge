@@ -1,4 +1,4 @@
-import { randomBytes, timingSafeEqual } from "node:crypto";
+import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import { PAIRING_TOKEN_BYTES } from "./constants.js";
 
 export function generatePairingToken(): string {
@@ -20,4 +20,12 @@ export function readBearerToken(header: string | undefined): string | undefined 
   }
   const match = /^Bearer\s+(\S+)$/i.exec(header.trim());
   return match?.[1];
+}
+
+export function sha256Hex(bytes: Uint8Array): string {
+  return createHash("sha256").update(bytes).digest("hex");
+}
+
+export function isJpegBytes(bytes: Uint8Array): boolean {
+  return bytes.length >= 3 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff;
 }

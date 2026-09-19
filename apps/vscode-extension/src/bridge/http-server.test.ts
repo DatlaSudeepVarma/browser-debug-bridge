@@ -3,11 +3,13 @@ import { after, describe, it } from "node:test";
 import {
   PROTOCOL_VERSION,
   createFakeSessionSubmission,
+  parseDebugSession,
   type ProtocolError,
+  type SessionSubmission,
 } from "@browser-debug-bridge/schema";
 import { BridgeServer, type BridgeServerOptions } from "./server.js";
 import { SessionStore } from "./session-store.js";
-import { generatePairingToken } from "./crypto.js";
+import { generatePairingToken, sha256Hex } from "./crypto.js";
 import { isLoopbackAddress, isLoopbackHostHeader } from "./handler.js";
 
 const TOKEN = generatePairingToken();
@@ -300,5 +302,199 @@ describe("BridgeServer HTTP", () => {
     const response = await fetch(`http://127.0.0.1:${String(server.addressPort())}/health`);
     assert.equal(response.status, 200);
     await server.stop();
+  });
+});
+
+function jpegBytes(tag: number): Buffer {
+  return Buffer.from([0xff, 0xd8, 0xff, 0xe0, tag, ...Array.from({ length: 24 }, () => tag)]);
+}
+
+function jpegSubmission(bytes: Buffer): SessionSubmission {
+  const fake = createFakeSessionSubmission();
+  const session = parseDebugSession({
+    ...fake.session,
+    screenshot: {
+      mime: "image/jpeg",
+      width: 8,
+      height: 8,
+      sha256: sha256Hex(bytes),
+      cropped: true,
+    },
+  });
+  return {
+    ...fake,
+    session,
+    requestId: session.sessionId,
+  };
+}
+
+describe("screenshot upload", () => {
+  const servers: BridgeServer[] = [];
+
+  after(async () => {
+    await Promise.all(servers.map((server) => server.stop()));
+  });
+
+  async function running(
+    overrides?: Parameters<typeof startServer>[0],
+  ): Promise<BridgeServer> {
+    const server = await startServer(overrides);
+    servers.push(server);
+    return server;
+  }
+
+  it("rejects unauthorized screenshot uploads", async () => {
+    const server = await running();
+    const sessionId = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee";
+    const response = await fetch(`${baseUrl(server)}/sessions/${sessionId}/screenshot`, {
+      method: "POST",
+      headers: { "Content-Type": "image/jpeg" },
+      body: jpegBytes(1),
+    });
+    assert.equal(response.status, 401);
+    assert.equal((await parseError(response)).code, "UNAUTHORIZED");
+  });
+
+  it("rejects an unknown screenshot session id on delete", async () => {
+    const server = await running();
+    const sessionId = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee";
+    const response = await fetch(`${baseUrl(server)}/sessions/${sessionId}/screenshot`, {
+      method: "DELETE",
+      headers: { Authorization: `Bearer ${TOKEN}` },
+    });
+    assert.equal(response.status, 404);
+    assert.equal((await parseError(response)).code, "SESSION_NOT_FOUND");
+  });
+
+  it("rejects oversized screenshot uploads", async () => {
+    const server = await running();
+    const sessionId = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee";
+    const response = await fetch(`${baseUrl(server)}/sessions/${sessionId}/screenshot`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "image/jpeg",
+        Authorization: `Bearer ${TOKEN}`,
+      },
+      body: Buffer.alloc(1 * 1024 * 1024 + 1, 0xff),
+    });
+    assert.equal(response.status, 413);
+    assert.equal((await parseError(response)).code, "PAYLOAD_TOO_LARGE");
+  });
+
+  it("accepts a JPEG upload then the matching DebugSession", async () => {
+    const server = await running();
+    const bytes = jpegBytes(7);
+    const submission = jpegSubmission(bytes);
+    const upload = await fetch(
+      `${baseUrl(server)}/sessions/${submission.session.sessionId}/screenshot`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "image/jpeg",
+          Authorization: `Bearer ${TOKEN}`,
+        },
+        body: bytes,
+      },
+    );
+    assert.equal(upload.status, 200);
+    const ack = (await upload.json()) as { type: string; sha256: string; bytes: number };
+    assert.equal(ack.type, "screenshot.ack");
+    assert.equal(ack.sha256, submission.session.screenshot.sha256);
+    assert.equal(ack.bytes, bytes.length);
+
+    const submit = await fetch(`${baseUrl(server)}/sessions`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${TOKEN}`,
+      },
+      body: JSON.stringify(submission),
+    });
+    assert.equal(submit.status, 200);
+    const stored = server.getScreenshot(submission.session.sessionId);
+    assert.ok(stored);
+    assert.equal(stored.bound, true);
+    assert.equal(stored.sha256, submission.session.screenshot.sha256);
+    assert.equal("bytes" in (server.getSession(submission.session.sessionId)?.screenshot ?? {}), false);
+  });
+
+  it("rejects a JPEG session when no screenshot was uploaded", async () => {
+    const server = await running();
+    const submission = jpegSubmission(jpegBytes(3));
+    const response = await fetch(`${baseUrl(server)}/sessions`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${TOKEN}`,
+      },
+      body: JSON.stringify(submission),
+    });
+    assert.equal(response.status, 400);
+    assert.equal((await parseError(response)).code, "INVALID_SESSION");
+  });
+
+  it("cleans up a pending screenshot when session metadata is rejected", async () => {
+    const server = await running();
+    const bytes = jpegBytes(9);
+    const submission = jpegSubmission(jpegBytes(4));
+    const upload = await fetch(
+      `${baseUrl(server)}/sessions/${submission.session.sessionId}/screenshot`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "image/jpeg",
+          Authorization: `Bearer ${TOKEN}`,
+        },
+        body: bytes,
+      },
+    );
+    assert.equal(upload.status, 200);
+    const response = await fetch(`${baseUrl(server)}/sessions`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${TOKEN}`,
+      },
+      body: JSON.stringify(submission),
+    });
+    assert.equal(response.status, 400);
+    assert.equal(server.getScreenshot(submission.session.sessionId), undefined);
+  });
+
+  it("evicts screenshot artifacts with their sessions", async () => {
+    const server = await running({ maxSessions: 2 });
+    const items = [jpegBytes(11), jpegBytes(12), jpegBytes(13)].map((bytes) => ({
+      bytes,
+      submission: jpegSubmission(bytes),
+    }));
+    for (const item of items) {
+      const upload = await fetch(
+        `${baseUrl(server)}/sessions/${item.submission.session.sessionId}/screenshot`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "image/jpeg",
+            Authorization: `Bearer ${TOKEN}`,
+          },
+          body: item.bytes,
+        },
+      );
+      assert.equal(upload.status, 200);
+      const submit = await fetch(`${baseUrl(server)}/sessions`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${TOKEN}`,
+        },
+        body: JSON.stringify(item.submission),
+      });
+      assert.equal(submit.status, 200);
+    }
+    const first = items[0];
+    const third = items[2];
+    assert.ok(first && third);
+    assert.equal(server.getSession(first.submission.session.sessionId), undefined);
+    assert.equal(server.getScreenshot(first.submission.session.sessionId), undefined);
+    assert.ok(server.getScreenshot(third.submission.session.sessionId));
   });
 });

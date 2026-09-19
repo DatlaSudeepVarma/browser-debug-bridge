@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "Browser Debug Bridge",
   "version": "0.1.0",
-  "description": "Local-first Chrome extension for Browser Debug Bridge. Phase 4 can pair with VS Code and capture a selected DOM element.",
+  "description": "Local-first Chrome extension for Browser Debug Bridge. Phase 5C can pair with VS Code and capture a selected element, cropped screenshot, console evidence, and network failure metadata.",
   "background": {
     "service_worker": "background.js",
     "type": "module"

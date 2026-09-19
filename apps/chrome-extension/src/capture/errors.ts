@@ -13,7 +13,10 @@ export const ERRORS = {
   pickerFailed: "The element picker could not start on this page.",
   noElement: "No element was selected.",
   cancelled: "Capture was cancelled.",
-  validationFailed: "The captured session was invalid and was not sent.",
+  screenshotFailed: "Could not capture a screenshot of the selected element.",
+  screenshotNotVisible:
+    "The selected element is not visible in the current viewport.",
+  screenshotTooLarge: "The screenshot is too large to send.",
 } as const;
 
 export function userFacingError(error: unknown): string {

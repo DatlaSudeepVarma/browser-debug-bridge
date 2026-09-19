@@ -34,6 +34,7 @@ function payload(overrides: Partial<PageCapturePayload> = {}): PageCapturePayloa
       origin: "http://127.0.0.1:4173",
     },
     browser: { name: "Chrome", version: "129.0.0.0" },
+    viewport: { width: 1280, height: 720, devicePixelRatio: 1 },
     crossOriginStylesheetsSkipped: false,
     truncatedFields: [],
     ...overrides,
@@ -48,6 +49,13 @@ const baseInput = {
   endedAt: "2026-09-18T16:30:00.000Z",
   tabIdHash: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
   extensionVersion: "0.1.0",
+  screenshot: {
+    mime: "image/jpeg" as const,
+    width: 80,
+    height: 24,
+    sha256: "ab".repeat(32),
+    cropped: true,
+  },
 };
 
 describe("browser identity", () => {
@@ -77,7 +85,9 @@ describe("DebugSession construction", () => {
     assert.equal(result.session.schemaVersion, 1);
     assert.equal(result.session.console.length, 0);
     assert.equal(result.session.network.length, 0);
-    assert.equal(result.session.screenshot.width, 1);
+    assert.equal(result.session.screenshot.width, 80);
+    assert.equal(result.session.screenshot.mime, "image/jpeg");
+    assert.equal(result.session.screenshot.cropped, true);
     assert.deepEqual(result.session.capture.permissionsGranted, [
       "activeTab",
       "scripting",
@@ -124,5 +134,67 @@ describe("DebugSession construction", () => {
     assert.equal(serialized.includes("FakePassword123!"), false);
     assert.equal(result.session.page.url.includes(REDACTED_PLACEHOLDER), true);
     assert.equal(result.session.userDescription.includes(FAKE_JWT), false);
+  });
+
+  it("includes redacted console entries in the DebugSession", () => {
+    const result = buildDebugSession({
+      ...baseInput,
+      payload: payload(),
+      consoleEntries: [
+        {
+          level: "log",
+          message: "fixture log token=fake-token-123",
+          timestamp: "2026-09-19T07:14:00.000Z",
+        },
+        {
+          level: "error",
+          message: `api_key=fake-api-key-456 ${FAKE_JWT}`,
+          timestamp: "2026-09-19T07:14:01.000Z",
+          stack: "Error: boom token=fake-token-123\n    at fake.js:1:1",
+        },
+      ],
+    });
+    assert.equal(result.ok, true);
+    if (!result.ok) {
+      return;
+    }
+    const parsed = safeParseDebugSession(result.session);
+    assert.equal(parsed.success, true);
+    assert.equal(result.session.console.length, 2);
+    assert.equal(result.session.console[0]?.level, "log");
+    const serialized = JSON.stringify(result.session.console);
+    assert.equal(serialized.includes("fake-token-123"), false);
+    assert.equal(serialized.includes("fake-api-key-456"), false);
+    assert.equal(serialized.includes(FAKE_JWT), false);
+    assert.equal(result.session.redaction.rulesApplied.includes("console-text"), true);
+  });
+
+  it("includes redacted network failure metadata in the DebugSession", () => {
+    const result = buildDebugSession({
+      ...baseInput,
+      payload: payload(),
+      networkEntries: [
+        {
+          timestamp: "2026-09-19T08:00:00.000Z",
+          method: "GET",
+          urlRedacted: "http://127.0.0.1:4173/api/debug/server-error?token=fake-network-token",
+          status: 500,
+          resourceType: "fetch",
+        },
+      ],
+    });
+    assert.equal(result.ok, true);
+    if (!result.ok) {
+      return;
+    }
+    const parsed = safeParseDebugSession(result.session);
+    assert.equal(parsed.success, true);
+    assert.equal(result.session.network.length, 1);
+    assert.equal(result.session.network[0]?.status, 500);
+    const serialized = JSON.stringify(result.session.network);
+    assert.equal(serialized.includes("fake-network-token"), false);
+    assert.equal(serialized.includes("body"), false);
+    assert.equal(serialized.includes("Authorization"), false);
+    assert.equal(result.session.redaction.rulesApplied.includes("network-url"), true);
   });
 });

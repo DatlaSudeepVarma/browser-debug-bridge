@@ -220,6 +220,13 @@ export function captureElement(element: HTMLElement): PageCapturePayload {
       origin: window.location.origin,
     }),
     browser: parseBrowserIdentity(navigator.userAgent),
+    viewport: {
+      width: window.innerWidth,
+      height: window.innerHeight,
+      devicePixelRatio: Number.isFinite(window.devicePixelRatio)
+        ? window.devicePixelRatio
+        : 1,
+    },
     crossOriginStylesheetsSkipped: matched.crossOriginStylesheetsSkipped,
     truncatedFields,
   };

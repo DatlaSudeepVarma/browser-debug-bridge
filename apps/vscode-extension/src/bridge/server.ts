@@ -7,9 +7,11 @@ import {
   BRIDGE_HOST,
   BRIDGE_PORT,
   MAX_SESSIONS,
+  MAX_SCREENSHOT_ARTIFACTS,
 } from "./constants.js";
 import { createBridgeHandler } from "./handler.js";
 import { createConsoleLogger, type BridgeLogger } from "./logger.js";
+import { ScreenshotStore, type ScreenshotArtifact } from "./screenshot-store.js";
 import { SessionStore } from "./session-store.js";
 
 export interface BridgeServerOptions {
@@ -26,11 +28,13 @@ export interface BridgeServerOptions {
 export class BridgeServer {
   private server: Server | undefined;
   private readonly store: SessionStore;
+  private readonly screenshots: ScreenshotStore;
   private readonly logger: BridgeLogger;
   private readonly port: number;
 
   public constructor(private readonly options: BridgeServerOptions) {
     this.store = new SessionStore(options.maxSessions ?? MAX_SESSIONS);
+    this.screenshots = new ScreenshotStore(MAX_SCREENSHOT_ARTIFACTS);
     this.logger = options.logger ?? createConsoleLogger();
     this.port = options.port ?? BRIDGE_PORT;
   }
@@ -63,6 +67,14 @@ export class BridgeServer {
     return this.store.size;
   }
 
+  public getScreenshot(sessionId: string): ScreenshotArtifact | undefined {
+    return this.screenshots.get(sessionId);
+  }
+
+  public screenshotCount(): number {
+    return this.screenshots.size;
+  }
+
   public createTestSession(): DebugSessionV1 {
     const session = createFakeDebugSessionV1();
     this.store.add(session);
@@ -80,6 +92,7 @@ export class BridgeServer {
       expectedChromeExtensionId: this.options.expectedChromeExtensionId,
       pairingToken: this.options.pairingToken,
       store: this.store,
+      screenshots: this.screenshots,
       logger: this.logger,
       maxBodyBytes: this.options.maxBodyBytes,
       bodyWarnBytes: this.options.bodyWarnBytes,

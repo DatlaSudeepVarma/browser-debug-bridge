@@ -1,9 +1,11 @@
 import { z } from "zod";
 import {
+  HexSha256Schema,
   IsoTimestampSchema,
   PAIRING_TOKEN_PATTERN,
   PROTOCOL_LIMITS,
   PROTOCOL_VERSION,
+  SCREENSHOT_LIMITS,
   UuidSchema,
   strictObject,
 } from "./common.js";
@@ -97,6 +99,16 @@ export const SessionAcknowledgementSchema = strictObject({
   accepted: z.boolean(),
 });
 
+export const ScreenshotAcknowledgementSchema = strictObject({
+  protocolVersion: ProtocolVersionSchema,
+  type: z.literal("screenshot.ack"),
+  requestId: UuidSchema.optional(),
+  sessionId: UuidSchema,
+  accepted: z.literal(true),
+  sha256: HexSha256Schema,
+  bytes: z.number().int().nonnegative().max(SCREENSHOT_LIMITS.maxBytes),
+});
+
 export const ProtocolErrorSchema = strictObject({
   protocolVersion: ProtocolVersionSchema,
   type: z.literal("error"),
@@ -114,6 +126,7 @@ export const ProtocolMessageSchema = z.discriminatedUnion("type", [
   PairStatusSchema,
   SessionSubmissionSchema,
   SessionAcknowledgementSchema,
+  ScreenshotAcknowledgementSchema,
   ProtocolErrorSchema,
 ]);
 
@@ -126,6 +139,9 @@ export type PairStatus = z.infer<typeof PairStatusSchema>;
 export type SessionSubmission = z.infer<typeof SessionSubmissionSchema>;
 export type SessionAcknowledgement = z.infer<
   typeof SessionAcknowledgementSchema
+>;
+export type ScreenshotAcknowledgement = z.infer<
+  typeof ScreenshotAcknowledgementSchema
 >;
 export type ProtocolError = z.infer<typeof ProtocolErrorSchema>;
 export type ProtocolMessage = z.infer<typeof ProtocolMessageSchema>;

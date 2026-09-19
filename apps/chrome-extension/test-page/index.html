@@ -24,6 +24,18 @@
         display: block;
         margin: 8px 0;
       }
+      .small-target {
+        display: inline-block;
+        padding: 4px 8px;
+        font-size: 12px;
+        background: #eee;
+      }
+      .large-target {
+        min-height: 420px;
+        padding: 32px;
+        background: #f4f0ff;
+        border: 2px dashed #6b4ea0;
+      }
     </style>
   </head>
   <body>
@@ -36,7 +48,37 @@
           <button id="pricing-cta" class="primary" data-testid="pricing-cta" type="button">
             Buy now
           </button>
+          <p>
+            Small:
+            <span id="small-target" class="small-target">tiny</span>
+          </p>
         </div>
+      </section>
+      <section id="large-panel" class="card large-target">
+        <h2>Large visible region</h2>
+        <p>Select this panel to exercise cropped screenshot scaling.</p>
+      </section>
+      <section class="card">
+        <h2>Fake console evidence</h2>
+        <p>Use these only after Start Debug Session. Values are fake.</p>
+        <p>
+          <button id="emit-log" type="button">console.log</button>
+          <button id="emit-warn" type="button">console.warn</button>
+          <button id="emit-error" type="button">console.error</button>
+          <button id="emit-throw" type="button">throw Error</button>
+          <button id="emit-reject" type="button">unhandled rejection</button>
+        </p>
+      </section>
+      <section class="card">
+        <h2>Fake network evidence</h2>
+        <p>Use these only after Start Debug Session. Requests stay on this local fixture server.</p>
+        <p>
+          <button id="net-ok" type="button">GET /api/debug/ok (200)</button>
+          <button id="net-404" type="button">GET /api/debug/not-found (404)</button>
+          <button id="net-500" type="button">GET /api/debug/server-error (500)</button>
+          <button id="net-reject" type="button">fetch rejection</button>
+          <button id="net-xhr" type="button">XHR 500</button>
+        </p>
       </section>
       <section class="card">
         <h2>Fake sensitive fields</h2>
@@ -54,5 +96,41 @@
         </p>
       </section>
     </main>
+    <script>
+      document.getElementById("emit-log")?.addEventListener("click", () => {
+        console.log("fixture log token=fake-token-123");
+      });
+      document.getElementById("emit-warn")?.addEventListener("click", () => {
+        console.warn("fixture warn");
+      });
+      document.getElementById("emit-error")?.addEventListener("click", () => {
+        console.error("fixture error api_key=fake-api-key-456", new Error("Fake console error"));
+      });
+      document.getElementById("emit-throw")?.addEventListener("click", () => {
+        window.setTimeout(() => {
+          throw new Error("Fake thrown error");
+        }, 0);
+      });
+      document.getElementById("emit-reject")?.addEventListener("click", () => {
+        void Promise.reject(new Error("Fake unhandled rejection api_key=fake-api-key-456"));
+      });
+      document.getElementById("net-ok")?.addEventListener("click", () => {
+        void fetch("/api/debug/ok");
+      });
+      document.getElementById("net-404")?.addEventListener("click", () => {
+        void fetch("/api/debug/not-found");
+      });
+      document.getElementById("net-500")?.addEventListener("click", () => {
+        void fetch("/api/debug/server-error?token=fake-network-token");
+      });
+      document.getElementById("net-reject")?.addEventListener("click", () => {
+        void fetch("http://127.0.0.1:9/unavailable");
+      });
+      document.getElementById("net-xhr")?.addEventListener("click", () => {
+        const xhr = new XMLHttpRequest();
+        xhr.open("GET", "/api/debug/server-error?token=fake-network-token");
+        xhr.send();
+      });
+    </script>
   </body>
 </html>

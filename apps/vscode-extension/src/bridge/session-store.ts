@@ -43,4 +43,14 @@ export class SessionStore {
   public ids(): string[] {
     return [...this.sessions.keys()];
   }
+
+  public latest(): StoredSession | undefined {
+    let found: StoredSession | undefined;
+    for (const item of this.sessions.values()) {
+      if (found === undefined || item.receivedAt >= found.receivedAt) {
+        found = item;
+      }
+    }
+    return found;
+  }
 }

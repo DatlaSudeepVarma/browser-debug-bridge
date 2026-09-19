@@ -48,6 +48,9 @@ importers:
 
   apps/vscode-extension:
     dependencies:
+      '@browser-debug-bridge/redaction':
+        specifier: workspace:*
+        version: link:../../packages/redaction
       '@browser-debug-bridge/schema':
         specifier: workspace:*
         version: link:../../packages/schema

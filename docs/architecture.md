@@ -50,7 +50,7 @@ DebugSessionV1 contains only screenshot **metadata** (`mime`, `width`, `height`,
 
 Its future job is to receive a debug session, inspect the open project, present a diagnosis, and propose a code fix. The developer reviews the proposal and chooses whether to apply it.
 
-Phase 1 established the extension foundation and a Hello smoke-test command. Phase 3 starts a loopback HTTP bridge inside the extension process, stores pairing tokens in SecretStorage, and keeps recent DebugSession payloads in memory. It does not analyze the workspace, show a Debug Session tree, call an AI provider, or modify files.
+Phase 1 established the extension foundation and a Hello smoke-test command. Phase 3 starts a loopback HTTP bridge inside the extension process, stores pairing tokens in SecretStorage, and keeps recent DebugSession payloads in memory. Phase 6 adds a deterministic, local **project intelligence** subsystem that turns a DebugSession plus the open workspace into a bounded `ProjectContext`. It does not show a Debug Session tree, call an AI provider, or modify files.
 
 ## 4. Shared packages
 
@@ -110,7 +110,7 @@ Security is a product constraint, not a later add-on:
 - Patch path protection: generated fixes must not silently touch protected paths.
 - Human approval: diagnosis may propose a fix; only the developer applies it.
 
-Phase 5A added cropped screenshot capture. Phase 5B added session-scoped console capture. Phase 5C adds session-scoped network failure metadata. AI, project intelligence, TreeView, diffs, and file modification remain later phases.
+Phase 5A added cropped screenshot capture. Phase 5B added session-scoped console capture. Phase 5C added session-scoped network failure metadata. Phase 6 adds deterministic project intelligence. AI, TreeView, diffs, and file modification remain later phases.
 
 ## 8. Phase 4–5C capture details
 
@@ -222,3 +222,66 @@ Reload or navigation clears the buffer with the existing session lifecycle.
 Cookies, authorization headers, `localStorage` / `sessionStorage` / IndexedDB, password-manager data, complete browser console history, successful network traffic, request/response bodies, full-page or other-tab screenshots, browser chrome, and workspace files.
 
 Cross-origin stylesheets that throw when reading `cssRules` are skipped. Capture continues; a bounded evidence note may be added.
+
+## 9. Project intelligence (Phase 6)
+
+Project intelligence is a VS Code-only, in-memory analysis step:
+
+```
+DebugSessionV1
+    → workspace resolution (all folders; never assume folder[0] is the only root)
+    → bounded findFiles (max 500 source files, ignore generated/secret paths)
+    → manifest / lockfile reads
+    → deterministic signals + scores
+    → ranked candidates (max 12)
+    → bounded excerpts
+    → ProjectContext
+```
+
+`ProjectContext` is internal. It is not sent to Chrome, not written to disk, and not exposed on the HTTP bridge.
+
+### Workspace jail
+
+Browser fields (URLs, selectors, console stacks, network paths) are untrusted search signals. They never become arbitrary filesystem paths. File access is `workspaceRoot + internally discovered relative path`. `inspectWorkspacePath` rejects traversal, absolute paths outside the folder, UNC paths, `.env*`, keys, PEM files, and credentials files. Home-directory `~` is not expanded.
+
+If no workspace is open, analysis returns `{ status: "no-workspace" }` instead of scanning the disk.
+
+### Discovery and ignores
+
+`vscode.workspace.findFiles` (or the test memory workspace) lists source files with a hard cap of **500**. Multi-root folders share that budget so the first folder cannot consume the entire scan. Ignored directories include `.git`, `node_modules`, `.next`, `dist`, `build`, `coverage`, `out`, `target`, `vendor`, `.cache`, `tmp`, and `logs`.
+
+This is not a full-repository walk and not a HAR or ripgrep product.
+
+### Framework and package manager
+
+Framework and language hints come from small manifests (`package.json`, `tsconfig.json`, lockfiles, common `*.config.*` names). Detection prefers package names (`next`, `nuxt`, `@angular/core`, `astro`, `svelte`, `vue`, `react`) over random filename matches. Package manager evidence is lockfile/workspace-file presence: bun, then pnpm, then yarn, then npm.
+
+### Candidate signals and scoring
+
+Scores are named integer weights, not statistical confidence:
+
+| Signal | Weight |
+| --- | --- |
+| Console stack path that resolves inside the workspace | 100 |
+| Page URL path segment | 40 |
+| Network failure URL path segment | 25 |
+| Selected element id | 25 |
+| data-testid | 20 |
+| Component / file name | 20 |
+| Class name | 15 |
+| Framework routing convention | 10 |
+| Selected text (weak) | 5 |
+
+Ties break by workspace folder name, then relative path. The list is **ranked candidates**, not a claim that the first file is correct.
+
+### Excerpts
+
+At most **3** excerpts per file, **40** lines each, **200** total context lines. Files larger than **256 KB** are not fully loaded; excerpts are omitted unless a target line is already known. Entire files are never attached.
+
+### Cancellation and privacy
+
+`CancellationToken` is checked between stages. Cancelled runs return `{ status: "cancelled" }` and are not treated as a completed analysis. Workspace files are not sent to Chrome, cloud APIs, or an LLM in this phase.
+
+### Limitations
+
+Project intelligence cannot always identify the responsible source file. It does not read source maps unless they already appear as workspace-safe console paths. Resource types outside page `fetch` / XHR, generated CSS hashes, and files the page overwrote after hook install remain invisible. It is not AI.

@@ -63,6 +63,10 @@ export class BridgeServer {
     return this.store.get(sessionId)?.session;
   }
 
+  public latestSession(): DebugSessionV1 | undefined {
+    return this.store.latest()?.session;
+  }
+
   public sessionCount(): number {
     return this.store.size;
   }

@@ -5,10 +5,11 @@
   "type": "module",
   "description": "Manifest V3 Chrome extension for Browser Debug Bridge.",
   "scripts": {
-    "build": "vite build && vite build --config vite.content.config.ts && vite build --config vite.console-hook.config.ts",
+    "build": "vite build && vite build --config vite.content.config.ts && vite build --config vite.console-hook.config.ts && vite build --config vite.network-hook.config.ts",
     "dev": "vite build --watch",
+    "fixture-server": "node test-page/server.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "tsx --test src/capture/selectors.test.ts src/capture/css.test.ts src/capture/dom.test.ts src/capture/session.test.ts src/capture/tab-hash.test.ts src/capture/screenshot-geometry.test.ts src/capture/screenshot.test.ts src/capture/console/serializer.test.ts src/capture/console/buffer.test.ts src/capture/console/entries.test.ts src/capture/console/redact.test.ts"
+    "test": "tsx --test src/capture/selectors.test.ts src/capture/css.test.ts src/capture/dom.test.ts src/capture/session.test.ts src/capture/tab-hash.test.ts src/capture/screenshot-geometry.test.ts src/capture/screenshot.test.ts src/capture/console/serializer.test.ts src/capture/console/buffer.test.ts src/capture/console/entries.test.ts src/capture/console/redact.test.ts src/capture/network/entries.test.ts src/capture/network/buffer.test.ts src/capture/network/redact.test.ts"
   },
   "devDependencies": {
     "@types/chrome": "^0.1.4",

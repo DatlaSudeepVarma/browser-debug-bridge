@@ -28,9 +28,9 @@ V1 does not include a cloud backend, hosted API, dashboard, or database. Work st
 Phase 4 capture is session-scoped. The popup **Start Debug Session** control asks the service worker to inject `content-script.js` into the current tab with `chrome.scripting.executeScript` and `activeTab`. There is no permanent `content_scripts` registration and no `<all_urls>` permission.
 
 ```
-Page (picker / DOM / CSS / element geometry / session-scoped console)
+Page (picker / DOM / CSS / element geometry / session-scoped console / network failures)
     → chrome.runtime messaging
-    → service worker (screenshot + console ring buffer)
+    → service worker (screenshot + console + network ring buffers)
     → hide overlay, captureVisibleTab, crop, JPEG, SHA-256
     → POST /sessions/:sessionId/screenshot (raw JPEG)
     → redaction + DebugSessionV1 metadata + session.submit
@@ -42,7 +42,7 @@ The content script never receives the pairing token. Bridge authentication stays
 
 Temporary picker/session status uses `chrome.storage.session`. The pairing token and a per-installation tab-id salt stay in `chrome.storage.local`. Captured HTML and screenshot bytes are not written to disk.
 
-DebugSessionV1 contains only screenshot **metadata** (`mime`, `width`, `height`, `sha256`, `cropped`). JPEG bytes travel on a separate authenticated endpoint. `console[]` holds up to 50 session-scoped, redacted entries. `network` remains empty.
+DebugSessionV1 contains only screenshot **metadata** (`mime`, `width`, `height`, `sha256`, `cropped`). JPEG bytes travel on a separate authenticated endpoint. `console[]` holds up to 50 session-scoped, redacted entries. `network[]` holds up to 100 session-scoped failure metadata records (no bodies or headers).
 
 ## 3. VS Code extension
 
@@ -110,9 +110,9 @@ Security is a product constraint, not a later add-on:
 - Patch path protection: generated fixes must not silently touch protected paths.
 - Human approval: diagnosis may propose a fix; only the developer applies it.
 
-Phase 5A added cropped screenshot capture. Phase 5B adds session-scoped console capture. AI, project intelligence, TreeView, diffs, and file modification remain later phases.
+Phase 5A added cropped screenshot capture. Phase 5B added session-scoped console capture. Phase 5C adds session-scoped network failure metadata. AI, project intelligence, TreeView, diffs, and file modification remain later phases.
 
-## 8. Phase 4–5B capture details
+## 8. Phase 4–5C capture details
 
 ### Permissions
 
@@ -120,7 +120,7 @@ Phase 5A added cropped screenshot capture. Phase 5B adds session-scoped console 
 | --- | --- |
 | `storage` | Pairing token (`local`) and temporary capture status (`session`) |
 | `activeTab` | Access only the tab the user invoked the extension on |
-| `scripting` | Inject the picker/content script and a session-scoped MAIN-world console hook |
+| `scripting` | Inject the picker/content script and session-scoped MAIN-world console/network hooks |
 | `host_permissions`: `http://127.0.0.1:17321/*` | Existing local bridge (unchanged) |
 
 `activeTab` + `scripting` are sufficient for session-scoped page interaction. Host access to arbitrary sites is not required because the user starts capture from the toolbar popup on the current tab.
@@ -143,6 +143,7 @@ The payload is a `DebugSessionV1`:
 - `capture.permissionsGranted`: `activeTab` and `scripting` only
 - `screenshot`: JPEG metadata only (`mime`, `width`, `height`, `sha256`, `cropped`)
 - `console`: up to 50 `{ level, message, timestamp, stack? }` entries from the active session only
+- `network`: up to 100 `{ timestamp, method, urlRedacted, status?, resourceType?, error? }` failure records from the active session only
 
 `htmlBytes` is the UTF-8 size of the sanitized HTML before truncation, capped at the schema maximum.
 
@@ -190,8 +191,34 @@ Console text is untrusted. `@browser-debug-bridge/redaction` plus conservative b
 
 Reload or navigation invalidates the current session (existing picker lifecycle). The hook dies with the page; the service worker clears the buffer. A new page is not attached to the old session.
 
+### Session-scoped network failures
+
+This is **not** a HAR recorder and not a DevTools network panel. Capture starts with **Start Debug Session** and stops when the session ends. Only the current page is observed. `127.0.0.1:17321` / `localhost:17321` bridge traffic is never recorded.
+
+**What is captured**
+
+- Page `fetch` responses with HTTP status **>= 400**
+- Rejected `fetch` promises (connection failures)
+- `XMLHttpRequest` load with status >= 400, plus `error` / `abort`
+- Metadata only: `method` (uppercase; unknown methods become `GET`), redacted URL, optional status, optional `fetch` / `xmlhttprequest` resource type, optional short error
+
+**What is not captured**
+
+- HTTP 2xx / 3xx including 301, 302, 304
+- Request or response bodies
+- Request or response headers, cookies, Authorization
+- Other tabs, extension requests, or VS Code bridge requests
+- Images / scripts / stylesheets that fail outside page `fetch` / XHR (no `webRequest` / `debugger`)
+- Complete browser network history
+
+The MAIN-world hook wraps `window.fetch` and `XMLHttpRequest.prototype.open` / `send`, returns original results, does not clone or consume bodies, and restores the originals on session end. The page can overwrite `fetch` after install.
+
+URLs always pass through `redactUrl()` before `urlRedacted`. Duplicate network events with the same method, redacted URL, status/error within 250 ms are dropped. The service worker keeps the **most recent 100** failures (`MAX_NETWORK_ENTRIES`). URLs clip at 2048 characters; errors at 512. Extension logs may include buffer size only, never raw URLs.
+
+Reload or navigation clears the buffer with the existing session lifecycle.
+
 ### Not captured
 
-Cookies, authorization headers, `localStorage` / `sessionStorage` / IndexedDB, password-manager data, complete browser console history, network requests, full-page or other-tab screenshots, browser chrome, and workspace files.
+Cookies, authorization headers, `localStorage` / `sessionStorage` / IndexedDB, password-manager data, complete browser console history, successful network traffic, request/response bodies, full-page or other-tab screenshots, browser chrome, and workspace files.
 
 Cross-origin stylesheets that throw when reading `cssRules` are skipped. Capture continues; a bounded evidence note may be added.

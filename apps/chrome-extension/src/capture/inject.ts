@@ -36,6 +36,14 @@ export async function injectConsoleHook(tabId: number): Promise<void> {
   });
 }
 
+export async function injectNetworkHook(tabId: number): Promise<void> {
+  await chrome.scripting.executeScript({
+    target: { tabId },
+    world: "MAIN",
+    files: ["network-hook.js"],
+  });
+}
+
 export async function startCaptureOnActiveTab(): Promise<
   { ok: true } | { ok: false; error: string }
 > {
@@ -68,6 +76,12 @@ export async function startCaptureOnActiveTab(): Promise<
     await injectConsoleHook(tab.id);
   } catch {
     // Isolated-world error listeners still run if the MAIN-world hook cannot install.
+  }
+
+  try {
+    await injectNetworkHook(tab.id);
+  } catch {
+    // Network metadata is skipped if the MAIN-world hook cannot install.
   }
 
   await setCaptureState({

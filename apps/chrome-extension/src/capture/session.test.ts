@@ -168,4 +168,33 @@ describe("DebugSession construction", () => {
     assert.equal(serialized.includes(FAKE_JWT), false);
     assert.equal(result.session.redaction.rulesApplied.includes("console-text"), true);
   });
+
+  it("includes redacted network failure metadata in the DebugSession", () => {
+    const result = buildDebugSession({
+      ...baseInput,
+      payload: payload(),
+      networkEntries: [
+        {
+          timestamp: "2026-09-19T08:00:00.000Z",
+          method: "GET",
+          urlRedacted: "http://127.0.0.1:4173/api/debug/server-error?token=fake-network-token",
+          status: 500,
+          resourceType: "fetch",
+        },
+      ],
+    });
+    assert.equal(result.ok, true);
+    if (!result.ok) {
+      return;
+    }
+    const parsed = safeParseDebugSession(result.session);
+    assert.equal(parsed.success, true);
+    assert.equal(result.session.network.length, 1);
+    assert.equal(result.session.network[0]?.status, 500);
+    const serialized = JSON.stringify(result.session.network);
+    assert.equal(serialized.includes("fake-network-token"), false);
+    assert.equal(serialized.includes("body"), false);
+    assert.equal(serialized.includes("Authorization"), false);
+    assert.equal(result.session.redaction.rulesApplied.includes("network-url"), true);
+  });
 });

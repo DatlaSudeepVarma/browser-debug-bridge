@@ -69,6 +69,15 @@ export interface ConsoleEventPayload {
   source: ConsoleEventSource;
 }
 
+export interface NetworkEventPayload {
+  timestamp: string;
+  method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE" | "HEAD" | "OPTIONS";
+  urlRedacted: string;
+  status?: number;
+  resourceType?: "fetch" | "xmlhttprequest";
+  error?: string;
+}
+
 export type RuntimeMessage =
   | { type: "start-capture" }
   | { type: "cancel-capture" }
@@ -78,6 +87,7 @@ export type RuntimeMessage =
   | { type: "picker-failed"; error: string }
   | { type: "capture-cancelled" }
   | { type: "console-event"; entry: ConsoleEventPayload }
+  | { type: "network-event"; entry: NetworkEventPayload }
   | {
       type: "submit-capture";
       payload: PageCapturePayload;
@@ -121,6 +131,8 @@ export function isPageCapturePayload(value: unknown): value is PageCapturePayloa
 
 const CONSOLE_LEVELS = new Set(["debug", "log", "info", "warn", "error"]);
 const CONSOLE_SOURCES = new Set(["console", "page-error", "unhandled-rejection"]);
+const NETWORK_METHODS = new Set(["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"]);
+const NETWORK_RESOURCE_TYPES = new Set(["fetch", "xmlhttprequest"]);
 
 export function isConsoleEventPayload(value: unknown): value is ConsoleEventPayload {
   if (!isRecord(value)) {
@@ -134,6 +146,27 @@ export function isConsoleEventPayload(value: unknown): value is ConsoleEventPayl
     (value.stack === undefined || typeof value.stack === "string") &&
     typeof value.source === "string" &&
     CONSOLE_SOURCES.has(value.source)
+  );
+}
+
+export function isNetworkEventPayload(value: unknown): value is NetworkEventPayload {
+  if (!isRecord(value)) {
+    return false;
+  }
+  return (
+    typeof value.timestamp === "string" &&
+    typeof value.method === "string" &&
+    NETWORK_METHODS.has(value.method) &&
+    typeof value.urlRedacted === "string" &&
+    value.urlRedacted.length > 0 &&
+    (value.status === undefined ||
+      (typeof value.status === "number" &&
+        Number.isInteger(value.status) &&
+        value.status >= 100 &&
+        value.status <= 599)) &&
+    (value.resourceType === undefined ||
+      (typeof value.resourceType === "string" && NETWORK_RESOURCE_TYPES.has(value.resourceType))) &&
+    (value.error === undefined || typeof value.error === "string")
   );
 }
 
@@ -168,6 +201,10 @@ export function parseRuntimeMessage(value: unknown): RuntimeMessage | undefined 
     case "console-event":
       return isConsoleEventPayload(value.entry)
         ? { type: "console-event", entry: value.entry }
+        : undefined;
+    case "network-event":
+      return isNetworkEventPayload(value.entry)
+        ? { type: "network-event", entry: value.entry }
         : undefined;
     default:
       return undefined;

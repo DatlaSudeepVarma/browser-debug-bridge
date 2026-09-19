@@ -50,6 +50,10 @@ export const MAX_CONSOLE_ENTRIES = DEBUG_SESSION_LIMITS.consoleEntries;
 export const MAX_CONSOLE_MESSAGE_LENGTH = DEBUG_SESSION_LIMITS.consoleMessage;
 export const MAX_CONSOLE_STACK_LENGTH = DEBUG_SESSION_LIMITS.consoleStack;
 
+export const MAX_NETWORK_ENTRIES = DEBUG_SESSION_LIMITS.networkEntries;
+export const MAX_NETWORK_URL_LENGTH = DEBUG_SESSION_LIMITS.networkUrl;
+export const MAX_NETWORK_ERROR_LENGTH = DEBUG_SESSION_LIMITS.networkError;
+
 export const PROTOCOL_LIMITS = {
   clientName: 128,
   clientVersion: 64,

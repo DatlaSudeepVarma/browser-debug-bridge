@@ -4,12 +4,17 @@ import { ConsoleRingBuffer } from "./capture/console/buffer.js";
 import { createConsoleEntry } from "./capture/console/entries.js";
 import { MAX_CONSOLE_ENTRIES } from "./capture/console/limits.js";
 import { ERRORS, UNPAIRED_MESSAGE, userFacingError } from "./capture/errors.js";
+import { NetworkRingBuffer } from "./capture/network/buffer.js";
+import { createNetworkEntry } from "./capture/network/entries.js";
+import { MAX_NETWORK_ENTRIES } from "./capture/network/limits.js";
+import { redactNetworkEntry } from "./capture/network/redact.js";
 import { startCaptureOnActiveTab } from "./capture/inject.js";
 import { CAPTURE_PORT_NAME } from "./capture/limits.js";
 import {
   parseRuntimeMessage,
   type CaptureState,
   type ConsoleEventPayload,
+  type NetworkEventPayload,
   type PageCapturePayload,
   type RuntimeResponse,
 } from "./capture/messages.js";
@@ -29,9 +34,11 @@ import { hashTabId } from "./capture/tab-hash.js";
 console.info("Browser Debug Bridge service worker loaded.");
 
 const consoleBuffer = new ConsoleRingBuffer();
+const networkBuffer = new NetworkRingBuffer();
 
-function resetConsoleBuffer(): void {
+function resetCaptureBuffers(): void {
   consoleBuffer.clear();
+  networkBuffer.clear();
 }
 
 function acceptConsoleEvent(entry: ConsoleEventPayload, senderTabId: number | undefined): void {
@@ -57,6 +64,37 @@ function acceptConsoleEvent(entry: ConsoleEventPayload, senderTabId: number | un
   })();
 }
 
+function acceptNetworkEvent(entry: NetworkEventPayload, senderTabId: number | undefined): void {
+  void (async () => {
+    const state = await getCaptureState();
+    if (state.status !== "picking" && state.status !== "selected") {
+      return;
+    }
+    if (senderTabId === undefined || state.tabId !== senderTabId) {
+      return;
+    }
+    const built = createNetworkEntry({
+      timestamp: entry.timestamp,
+      method: entry.method,
+      url: entry.urlRedacted,
+      status: entry.status,
+      resourceType: entry.resourceType,
+      error: entry.error,
+      failed: entry.status === undefined && entry.error !== undefined,
+    });
+    if (built === undefined) {
+      return;
+    }
+    networkBuffer.push(redactNetworkEntry(built));
+    if (networkBuffer.size === 1 || networkBuffer.size === MAX_NETWORK_ENTRIES) {
+      console.info("Browser Debug Bridge capture:", {
+        type: "network-buffer",
+        size: networkBuffer.size,
+      });
+    }
+  })();
+}
+
 async function cancelCapture(state: CaptureState): Promise<void> {
   if (state.tabId !== undefined) {
     try {
@@ -66,7 +104,7 @@ async function cancelCapture(state: CaptureState): Promise<void> {
     }
   }
 
-  resetConsoleBuffer();
+  resetCaptureBuffers();
   await setCaptureState({
     status: "idle",
     lastError: ERRORS.cancelled,
@@ -98,12 +136,13 @@ async function submitCapturedSession(
     lastSelector: payload.selector,
   });
   const consoleEntries = consoleBuffer.snapshot();
+  const networkEntries = networkBuffer.snapshot();
 
   let windowId: number;
   try {
     const tab = await chrome.tabs.get(tabId);
     if (tab.active !== true) {
-      resetConsoleBuffer();
+      resetCaptureBuffers();
       await setCaptureState({
         status: "idle",
         lastError: ERRORS.screenshotFailed,
@@ -115,7 +154,7 @@ async function submitCapturedSession(
     }
     windowId = tab.windowId;
   } catch {
-    resetConsoleBuffer();
+    resetCaptureBuffers();
     return { ok: false, error: ERRORS.noActiveTab };
   }
 
@@ -132,7 +171,7 @@ async function submitCapturedSession(
         : captured.reason === "too-large"
           ? ERRORS.screenshotTooLarge
           : ERRORS.screenshotFailed;
-    resetConsoleBuffer();
+    resetCaptureBuffers();
     await setCaptureState({ status: "idle", lastError: error });
     return { ok: false, error };
   }
@@ -150,11 +189,12 @@ async function submitCapturedSession(
     extensionVersion: chrome.runtime.getManifest().version,
     screenshot: captured.value.metadata,
     consoleEntries,
+    networkEntries,
   });
 
   if (!built.ok) {
     console.info("Browser Debug Bridge capture:", { type: "validation-failed" });
-    resetConsoleBuffer();
+    resetCaptureBuffers();
     await setCaptureState({
       status: "idle",
       lastError: built.error,
@@ -165,7 +205,7 @@ async function submitCapturedSession(
   try {
     await submitScreenshot(built.session.sessionId, captured.value.bytes);
     const ack = await submitSession(built.submission);
-    resetConsoleBuffer();
+    resetCaptureBuffers();
     await setCaptureState({
       status: "idle",
       lastSessionId: ack.sessionId,
@@ -185,7 +225,7 @@ async function submitCapturedSession(
       error instanceof BridgeClientError && error.code === "UNPAIRED"
         ? UNPAIRED_MESSAGE
         : userFacingError(error);
-    resetConsoleBuffer();
+    resetCaptureBuffers();
     await setCaptureState({
       status: "idle",
       lastError: message,
@@ -203,10 +243,13 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   void (async (): Promise<RuntimeResponse> => {
     switch (parsed.type) {
       case "start-capture":
-        resetConsoleBuffer();
+        resetCaptureBuffers();
         return startCaptureOnActiveTab();
       case "console-event":
         acceptConsoleEvent(parsed.entry, sender.tab?.id);
+        return { ok: true };
+      case "network-event":
+        acceptNetworkEvent(parsed.entry, sender.tab?.id);
         return { ok: true };
       case "cancel-capture": {
         const state = await getCaptureState();
@@ -229,14 +272,14 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         });
         return { ok: true };
       case "picker-failed":
-        resetConsoleBuffer();
+        resetCaptureBuffers();
         await setCaptureState({
           status: "idle",
           lastError: parsed.error,
         });
         return { ok: false, error: parsed.error };
       case "capture-cancelled":
-        resetConsoleBuffer();
+        resetCaptureBuffers();
         await setCaptureState({
           status: "idle",
           lastError: ERRORS.cancelled,
@@ -267,7 +310,7 @@ chrome.runtime.onConnect.addListener((port) => {
     void (async () => {
       const state = await getCaptureState();
       if (state.status === "picking" && (tabId === undefined || state.tabId === tabId)) {
-        resetConsoleBuffer();
+        resetCaptureBuffers();
         await setCaptureState({
           status: "idle",
           lastError: ERRORS.cancelled,
@@ -281,7 +324,7 @@ chrome.tabs.onRemoved.addListener((tabId) => {
   void (async () => {
     const state = await getCaptureState();
     if (state.tabId === tabId && state.status !== "idle") {
-      resetConsoleBuffer();
+      resetCaptureBuffers();
       await clearCaptureState();
     }
   })();

@@ -1,5 +1,6 @@
 import { captureElement } from "./capture.js";
 import { startConsoleCapture } from "./console/capture.js";
+import { startNetworkCapture } from "./network/capture.js";
 import { CAPTURE_FLAG_KEY, CAPTURE_PORT_NAME, SCREENSHOT_SETTLE_MS } from "./limits.js";
 import type { RuntimeResponse } from "./messages.js";
 import { startPicker } from "./picker.js";
@@ -40,11 +41,27 @@ function publishConsoleEvent(entry: {
   });
 }
 
+function publishNetworkEvent(entry: {
+  timestamp: string;
+  method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE" | "HEAD" | "OPTIONS";
+  urlRedacted: string;
+  status?: number;
+  resourceType?: "fetch" | "xmlhttprequest";
+  error?: string;
+}): void {
+  chrome.runtime.sendMessage({ type: "network-event", entry }, () => {
+    void chrome.runtime.lastError;
+  });
+}
+
 function startCaptureMode(): void {
   const port = chrome.runtime.connect({ name: CAPTURE_PORT_NAME });
   let stopped = false;
   const consoleCapture = startConsoleCapture({
     publish: publishConsoleEvent,
+  });
+  const networkCapture = startNetworkCapture({
+    publish: publishNetworkEvent,
   });
 
   function stop(): void {
@@ -54,6 +71,7 @@ function startCaptureMode(): void {
     stopped = true;
     globalState[CAPTURE_FLAG_KEY] = false;
     consoleCapture.stop();
+    networkCapture.stop();
     picker.stop();
     try {
       port.disconnect();
@@ -81,6 +99,7 @@ function startCaptureMode(): void {
         onSubmit(description) {
           picker.hideVisuals();
           consoleCapture.stop();
+          networkCapture.stop();
           void (async () => {
             await new Promise<void>((resolve) => {
               window.setTimeout(resolve, SCREENSHOT_SETTLE_MS);

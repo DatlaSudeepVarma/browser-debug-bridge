@@ -166,15 +166,15 @@ Load the unpacked extension in Chrome:
 3. Click **Load unpacked**
 4. Select `apps/chrome-extension/dist`
 
-The built folder must contain `manifest.json`, `background.js`, `popup.html`, `content-script.js`, and `console-hook.js`. `content-script.js` and `console-hook.js` are produced by extra Vite IIFE builds and are injected only when the user starts a debug session (`console-hook.js` into the page MAIN world).
+The built folder must contain `manifest.json`, `background.js`, `popup.html`, `content-script.js`, `console-hook.js`, and `network-hook.js`. The extra Vite IIFE builds are injected only when the user starts a debug session (hooks into the page MAIN world).
 
-### Chrome permissions (Phase 4–5B)
+### Chrome permissions (Phase 4–5C)
 
 | Permission | Why it exists |
 | --- | --- |
 | `storage` | Pairing token in `chrome.storage.local`; capture status in `chrome.storage.session` |
 | `activeTab` | Reach only the tab where the user clicked the extension action |
-| `scripting` | Inject the session-scoped picker/content script and MAIN-world console hook |
+| `scripting` | Inject the session-scoped picker/content script and MAIN-world console/network hooks |
 | `host_permissions`: `http://127.0.0.1:17321/*` | Talk to the existing local VS Code bridge |
 
 Not requested: `<all_urls>`, `debugger`, `webRequest`, `cookies`, `tabs`.
@@ -199,7 +199,7 @@ For rebuild-on-change during popup/background work:
 pnpm --filter @browser-debug-bridge/chrome-extension dev
 ```
 
-That watch build does not rebuild `content-script.js` or `console-hook.js`. Use `pnpm build:chrome` after picker/content-script/console-hook changes.
+That watch build does not rebuild `content-script.js`, `console-hook.js`, or `network-hook.js`. Use `pnpm build:chrome` after picker/content-script/hook changes.
 
 Reload the extension on `chrome://extensions` after each rebuild.
 
@@ -233,10 +233,10 @@ curl http://127.0.0.1:17321/health
 
 Use the fixture page at `apps/chrome-extension/test-page/index.html`. It contains only fake secrets.
 
-1. From `apps/chrome-extension/test-page`, serve it on loopback, for example:
+1. From the repo root, serve the fixture (includes fake `/api/debug/*` routes):
 
    ```bash
-   python -m http.server 4173 --bind 127.0.0.1
+   pnpm --filter @browser-debug-bridge/chrome-extension fixture-server
    ```
 
 2. Open `http://127.0.0.1:4173/?token=fake-secret-token`.
@@ -263,7 +263,7 @@ The same fixture page includes a small `tiny` span, the medium **Buy now** butto
 6. If practical, select an element that is partly off-screen. Only the visible region is captured; the page is not scrolled.
 7. Reload the Extension Development Host and confirm in-memory screenshots are gone.
 
-Do not use real secrets. Screenshots are not redacted. Network capture is not implemented.
+Do not use real secrets. Screenshots are not redacted.
 
 ### Phase 5B console smoke test
 
@@ -279,3 +279,19 @@ The fixture page includes buttons that emit fake `console.log` / `warn` / `error
 8. Reload during capture and confirm the old session does not continue on the new page.
 
 A real Chrome + Extension Development Host is required for this path. Isolated-world unit tests do not load `chrome.tabs` or the MAIN-world hook.
+
+### Phase 5C network smoke test
+
+Serve the fixture with `pnpm --filter @browser-debug-bridge/chrome-extension fixture-server` so `/api/debug/ok`, `/api/debug/not-found`, and `/api/debug/server-error` exist.
+
+1. Pair Chrome with VS Code and open `http://127.0.0.1:4173/`.
+2. Start a debug session.
+3. Click **GET /api/debug/ok (200)** and confirm a later session does **not** include that 200.
+4. Click 404, 500 (`?token=fake-network-token`), fetch rejection, and XHR 500.
+5. Select an element and submit.
+6. Confirm VS Code `network[]` has failure metadata only: method, redacted URL, status/error. No bodies or headers.
+7. Confirm `fake-network-token` is `[REDACTED]` and `127.0.0.1:17321` is absent.
+8. Cancel a session, trigger another 404, and confirm it is not attached later.
+9. Reload during capture and confirm the old network buffer is dropped.
+
+This is not a HAR dump. A real Chrome + Extension Development Host is required for the MAIN-world `fetch` / XHR hook.

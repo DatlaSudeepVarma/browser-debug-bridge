@@ -12,6 +12,9 @@ import { normalizeUserDescription } from "./capture.js";
 import type { BuiltConsoleEntry } from "./console/entries.js";
 import { MAX_CONSOLE_ENTRIES } from "./console/limits.js";
 import { redactConsoleEntry } from "./console/redact.js";
+import type { BuiltNetworkEntry } from "./network/entries.js";
+import { MAX_NETWORK_ENTRIES } from "./network/limits.js";
+import { redactNetworkEntry } from "./network/redact.js";
 import { filterComputedSubset } from "./css.js";
 import { utf8ByteLength } from "./dom.js";
 import { CAPTURE_LIMITS, CAPTURE_PERMISSIONS_USED } from "./limits.js";
@@ -29,6 +32,7 @@ export interface SessionBuildInput {
   extensionVersion: string;
   screenshot: ScreenshotMetadata;
   consoleEntries?: BuiltConsoleEntry[];
+  networkEntries?: BuiltNetworkEntry[];
   permissionsGranted?: string[];
 }
 
@@ -48,10 +52,17 @@ function formatValidationError(path: ReadonlyArray<PropertyKey>): string {
   return `The captured session was invalid (${field}) and was not sent.`;
 }
 
-function evidenceFor(payload: PageCapturePayload, consoleCount: number): string[] {
+function evidenceFor(
+  payload: PageCapturePayload,
+  consoleCount: number,
+  networkCount: number,
+): string[] {
   const evidence = ["element picker capture", "cropped jpeg screenshot"];
   if (consoleCount > 0) {
     evidence.push("session-scoped console capture");
+  }
+  if (networkCount > 0) {
+    evidence.push("session-scoped network failure metadata");
   }
   if (payload.crossOriginStylesheetsSkipped) {
     evidence.push("cross-origin stylesheets skipped");
@@ -68,6 +79,10 @@ function sanitizeConsoleEntries(entries: BuiltConsoleEntry[]): BuiltConsoleEntry
   return entries.map(redactConsoleEntry).slice(-MAX_CONSOLE_ENTRIES);
 }
 
+function sanitizeNetworkEntries(entries: BuiltNetworkEntry[]): BuiltNetworkEntry[] {
+  return entries.map(redactNetworkEntry).slice(-MAX_NETWORK_ENTRIES);
+}
+
 export function buildDebugSession(input: SessionBuildInput): SessionBuildResult {
   const payload = input.payload;
   const pageUrl = clip(redactUrl(payload.page.url), CAPTURE_LIMITS.pageUrl);
@@ -78,6 +93,7 @@ export function buildDebugSession(input: SessionBuildInput): SessionBuildResult 
   );
   const id = safeElementId(payload.id);
   const consoleEntries = sanitizeConsoleEntries(input.consoleEntries ?? []);
+  const networkEntries = sanitizeNetworkEntries(input.networkEntries ?? []);
   const truncatedFields = [...payload.truncatedFields].slice(
     0,
     CAPTURE_LIMITS.truncatedFields,
@@ -88,6 +104,13 @@ export function buildDebugSession(input: SessionBuildInput): SessionBuildResult 
     truncatedFields.length < CAPTURE_LIMITS.truncatedFields
   ) {
     truncatedFields.push("console");
+  }
+  if (
+    (input.networkEntries?.length ?? 0) > MAX_NETWORK_ENTRIES &&
+    !truncatedFields.includes("network") &&
+    truncatedFields.length < CAPTURE_LIMITS.truncatedFields
+  ) {
+    truncatedFields.push("network");
   }
 
   const candidate = {
@@ -140,9 +163,9 @@ export function buildDebugSession(input: SessionBuildInput): SessionBuildResult 
     },
     screenshot: input.screenshot,
     console: consoleEntries,
-    network: [],
+    network: networkEntries,
     hints: {
-      evidence: evidenceFor(payload, consoleEntries.length),
+      evidence: evidenceFor(payload, consoleEntries.length, networkEntries.length),
     },
     capture: {
       startedAt: input.startedAt,
@@ -154,9 +177,9 @@ export function buildDebugSession(input: SessionBuildInput): SessionBuildResult 
       ),
     },
     redaction: {
-      rulesApplied: ["url", "dom", "text", "user-description", "console-text"],
+      rulesApplied: ["url", "dom", "text", "user-description", "console-text", "network-url"],
       notes:
-        "Phase 5B session-scoped console capture. Console redaction is heuristic (JWT, URLs, bearer tokens, sensitive query pairs). Runtime page errors and unhandled rejections are represented in console[]. Screenshot pixels are not redacted. Network is not captured.",
+        "Phase 5C session-scoped network failure metadata. URLs are redacted. Request/response bodies, headers, and cookies are not captured. Console redaction is heuristic. Screenshot pixels are not redacted. This is not a HAR recorder.",
     },
     metadata: {
       payloadBytes: 0,

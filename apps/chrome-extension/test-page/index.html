@@ -70,6 +70,17 @@
         </p>
       </section>
       <section class="card">
+        <h2>Fake network evidence</h2>
+        <p>Use these only after Start Debug Session. Requests stay on this local fixture server.</p>
+        <p>
+          <button id="net-ok" type="button">GET /api/debug/ok (200)</button>
+          <button id="net-404" type="button">GET /api/debug/not-found (404)</button>
+          <button id="net-500" type="button">GET /api/debug/server-error (500)</button>
+          <button id="net-reject" type="button">fetch rejection</button>
+          <button id="net-xhr" type="button">XHR 500</button>
+        </p>
+      </section>
+      <section class="card">
         <h2>Fake sensitive fields</h2>
         <form action="/account?token=fake-secret-token" method="post">
           <label>
@@ -102,6 +113,23 @@
       });
       document.getElementById("emit-reject")?.addEventListener("click", () => {
         void Promise.reject(new Error("Fake unhandled rejection api_key=fake-api-key-456"));
+      });
+      document.getElementById("net-ok")?.addEventListener("click", () => {
+        void fetch("/api/debug/ok");
+      });
+      document.getElementById("net-404")?.addEventListener("click", () => {
+        void fetch("/api/debug/not-found");
+      });
+      document.getElementById("net-500")?.addEventListener("click", () => {
+        void fetch("/api/debug/server-error?token=fake-network-token");
+      });
+      document.getElementById("net-reject")?.addEventListener("click", () => {
+        void fetch("http://127.0.0.1:9/unavailable");
+      });
+      document.getElementById("net-xhr")?.addEventListener("click", () => {
+        const xhr = new XMLHttpRequest();
+        xhr.open("GET", "/api/debug/server-error?token=fake-network-token");
+        xhr.send();
       });
     </script>
   </body>

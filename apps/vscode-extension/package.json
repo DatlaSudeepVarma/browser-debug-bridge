@@ -38,6 +38,11 @@
         "command": "browserDebugBridge.createTestSession",
         "title": "Create Test Session",
         "category": "Browser Debug Bridge"
+      },
+      {
+        "command": "browserDebugBridge.analyzeTestSession",
+        "title": "Analyze Test Session",
+        "category": "Browser Debug Bridge"
       }
     ],
     "configuration": {
@@ -55,9 +60,10 @@
     "build": "tsc -p tsconfig.json",
     "watch": "tsc -p tsconfig.json --watch",
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.test.json --noEmit",
-    "test": "tsx --test src/bridge/http-server.test.ts src/bridge/screenshot-store.test.ts"
+    "test": "tsx --test src/bridge/http-server.test.ts src/bridge/screenshot-store.test.ts src/project/framework.test.ts src/project/package-manager.test.ts src/project/signals.test.ts src/project/workspace.test.ts src/project/scoring.test.ts src/project/excerpts.test.ts src/project/service.test.ts"
   },
   "dependencies": {
+    "@browser-debug-bridge/redaction": "workspace:*",
     "@browser-debug-bridge/schema": "workspace:*"
   },
   "devDependencies": {

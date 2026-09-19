@@ -1,5 +1,5 @@
 import * as vscode from "vscode";
-import { PAIRING_TOKEN_PATTERN } from "@browser-debug-bridge/schema";
+import { createFakeDebugSessionV1, PAIRING_TOKEN_PATTERN } from "@browser-debug-bridge/schema";
 import {
   BRIDGE_HOST,
   BRIDGE_PORT,
@@ -8,6 +8,9 @@ import {
 import { generatePairingToken } from "./bridge/crypto.js";
 import type { BridgeLogger } from "./bridge/logger.js";
 import { BridgeServer } from "./bridge/server.js";
+import { ProjectIntelligenceService } from "./project/service.js";
+import { formatProjectIntelligenceSummary } from "./project/summary.js";
+import { createVscodeWorkspaceAccess, wrapVscodeCancellation } from "./project/vscode-access.js";
 
 let bridge: BridgeServer | undefined;
 
@@ -146,6 +149,35 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         void vscode.window.showInformationMessage(
           `Test session stored: ${session.sessionId}`,
         );
+      },
+    ),
+    vscode.commands.registerCommand(
+      "browserDebugBridge.analyzeTestSession",
+      async () => {
+        const session =
+          bridge?.latestSession() ??
+          (bridge?.listening === true ? bridge.createTestSession() : createFakeDebugSessionV1());
+        const tokenSource = new vscode.CancellationTokenSource();
+        const access = createVscodeWorkspaceAccess(tokenSource.token);
+        const service = new ProjectIntelligenceService(access);
+        const result = await service.analyzeSession(
+          session,
+          wrapVscodeCancellation(tokenSource.token),
+        );
+        tokenSource.dispose();
+        channel.appendLine(formatProjectIntelligenceSummary(result));
+        channel.show(true);
+        if (result.status === "ok") {
+          void vscode.window.showInformationMessage(
+            `Project intelligence complete. ${String(result.context.candidates.length)} ranked candidates.`,
+          );
+          return;
+        }
+        if (result.status === "no-workspace") {
+          void vscode.window.showWarningMessage("Open a workspace folder before analyzing a session.");
+          return;
+        }
+        void vscode.window.showWarningMessage("Project intelligence analysis was cancelled.");
       },
     ),
   );

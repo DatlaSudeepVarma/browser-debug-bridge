@@ -139,6 +139,7 @@ The token lives in VS Code `SecretStorage` (`browserDebugBridge.pairingToken`) a
 | Browser Debug Bridge: Start Local Bridge | Start the loopback server if it is not running |
 | Browser Debug Bridge: Stop Local Bridge | Stop the server (idempotent) |
 | Browser Debug Bridge: Create Test Session | Insert a fake `DebugSessionV1` into the in-memory store |
+| Browser Debug Bridge: Analyze Test Session | Run deterministic project intelligence on the latest/fake session and print a summary |
 
 ### Fake session testing
 
@@ -295,3 +296,20 @@ Serve the fixture with `pnpm --filter @browser-debug-bridge/chrome-extension fix
 9. Reload during capture and confirm the old network buffer is dropped.
 
 This is not a HAR dump. A real Chrome + Extension Development Host is required for the MAIN-world `fetch` / XHR hook.
+
+### Phase 6 project intelligence
+
+Analysis is local, deterministic, and AI-free. It uses the open VS Code workspace plus a `DebugSessionV1`. It does not modify files and does not print file contents to the Output channel.
+
+A small fake Next.js shop lives at `apps/vscode-extension/test-fixtures/fixture-project/` (`checkout` route, `BuyNowButton`, `/api/checkout`). Unit tests use the same files in memory.
+
+1. Open this repository (or the fixture folder) in the Extension Development Host.
+2. Command Palette → **Browser Debug Bridge: Analyze Test Session**.
+3. Confirm the **Browser Debug Bridge** output lists workspace identity, framework/package-manager hints, and ranked candidate paths with reasons only.
+4. Run the command again. Ordering of equal-score paths must stay stable.
+5. Confirm `.env`, `id_rsa`, `node_modules`, and `127.0.0.1:17321` do not appear as candidates.
+6. Close all workspace folders and run the command again — the result must be `no workspace`, not a crash.
+
+The command uses the latest stored session when one exists, otherwise `createFakeDebugSessionV1()`. The fake schema session is generic (`/profile`, `fake-submit`); the checkout fixture session is test-only and is not sent to Chrome.
+
+Pure functions under `apps/vscode-extension/src/project/` cover framework detection, scoring, path jail, excerpts, cancellation, and repeated analysis. Do not add Playwright or ripgrep dependencies.

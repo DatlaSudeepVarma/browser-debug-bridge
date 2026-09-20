@@ -140,6 +140,9 @@ The token lives in VS Code `SecretStorage` (`browserDebugBridge.pairingToken`) a
 | Browser Debug Bridge: Stop Local Bridge | Stop the server (idempotent) |
 | Browser Debug Bridge: Create Test Session | Insert a fake `DebugSessionV1` into the in-memory store |
 | Browser Debug Bridge: Analyze Test Session | Run deterministic project intelligence on the latest/fake session and print a summary |
+| Browser Debug Bridge: Diagnose Test Session | Run project intelligence, then a read-only `vscode.lm` diagnosis, and show it in the TreeView |
+| Browser Debug Bridge: Refresh Diagnosis | Re-run diagnosis against the latest stored debug session (does not create a session) |
+| Browser Debug Bridge: Clear Diagnosis | Drop the in-memory diagnosis and restore the TreeView empty state |
 
 ### Fake session testing
 
@@ -313,3 +316,36 @@ A small fake Next.js shop lives at `apps/vscode-extension/test-fixtures/fixture-
 The command uses the latest stored session when one exists, otherwise `createFakeDebugSessionV1()`. The fake schema session is generic (`/profile`, `fake-submit`); the checkout fixture session is test-only and is not sent to Chrome.
 
 Pure functions under `apps/vscode-extension/src/project/` cover framework detection, scoring, path jail, excerpts, cancellation, and repeated analysis. Do not add Playwright or ripgrep dependencies.
+
+### Phase 7 read-only diagnosis
+
+The model receives only `DebugSessionV1` + bounded `ProjectContext`. It cannot read or write the workspace.
+
+1. Open a workspace in the Extension Development Host.
+2. Command Palette → **Browser Debug Bridge: Diagnose Test Session**.
+3. Confirm the Output channel shows `[AI] Provider: vscode.lm`, candidate count, context chars, and `Diagnosis completed`.
+4. Confirm it does **not** print the full prompt, excerpts, pairing token, screenshot bytes, or model response text.
+5. If no language model is available, the output is `AI_UNAVAILABLE` and the extension does not crash.
+6. Run the command twice when a model is available. The serialized context is deterministic; the model text may vary.
+
+Unit tests use `FakeAiProvider` and do not call a real model. `pnpm --filter browser-debug-bridge-vscode test` covers serialization, validation, unknown-file removal, cancellation, and provider errors.
+
+Do not add OpenAI, Anthropic, Gemini, or agent-framework SDKs.
+
+### Phase 8 diagnosis TreeView
+
+Phase 8 provides a read-only diagnosis UI. It does not generate or apply code changes.
+
+The TreeView is a presentation layer over `DiagnosisService`. Expanding nodes does not read extra workspace files. Clicking a candidate opens that already-validated path after a final workspace jail check.
+
+1. Open a workspace in the Extension Development Host.
+2. Start Browser Debug Bridge and capture or create a test session.
+3. Command Palette → **Browser Debug Bridge: Diagnose Test Session**.
+4. Confirm the **Browser Debug Bridge** activity-bar view shows Summary, Hypotheses, Suggested Next Step, Evidence, and Limitations when those fields exist.
+5. Expand a hypothesis and confirm evidence ids are human-readable (`Network #0`, not a raw payload).
+6. Click a candidate file. Confirm it opens read-only in the editor and that git status does not show a write from the extension.
+7. Command Palette → **Refresh Diagnosis**. Confirm a successful run replaces the tree; a cancelled or failed run keeps the previous tree.
+8. Command Palette → **Clear Diagnosis**. Confirm the empty state: `No diagnosis available.`
+9. If no stored session exists, Refresh should warn `No debug session available. Start a browser debugging session first.`
+
+Unit tests under `apps/vscode-extension/src/ui/` cover controller state, tree construction, empty-section omission, candidate path jail, missing files, transactional replacement, AI error mapping, and plain-text labels. They do not import `vscode`.

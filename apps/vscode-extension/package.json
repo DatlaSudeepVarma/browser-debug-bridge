@@ -43,8 +43,62 @@
         "command": "browserDebugBridge.analyzeTestSession",
         "title": "Analyze Test Session",
         "category": "Browser Debug Bridge"
+      },
+      {
+        "command": "browserDebugBridge.diagnoseTestSession",
+        "title": "Diagnose Test Session",
+        "category": "Browser Debug Bridge"
+      },
+      {
+        "command": "browserDebugBridge.refreshDiagnosis",
+        "title": "Refresh Diagnosis",
+        "category": "Browser Debug Bridge",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "browserDebugBridge.clearDiagnosis",
+        "title": "Clear Diagnosis",
+        "category": "Browser Debug Bridge",
+        "icon": "$(clear-all)"
       }
     ],
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "browserDebugBridge",
+          "title": "Browser Debug Bridge",
+          "icon": "media/debug-bridge.svg"
+        }
+      ]
+    },
+    "views": {
+      "browserDebugBridge": [
+        {
+          "id": "browserDebugBridge.diagnosis",
+          "name": "Diagnosis"
+        }
+      ]
+    },
+    "viewsWelcome": [
+      {
+        "view": "browserDebugBridge.diagnosis",
+        "contents": "No diagnosis available.\n\nRun \"Browser Debug Bridge: Diagnose Test Session\""
+      }
+    ],
+    "menus": {
+      "view/title": [
+        {
+          "command": "browserDebugBridge.refreshDiagnosis",
+          "when": "view == browserDebugBridge.diagnosis",
+          "group": "navigation"
+        },
+        {
+          "command": "browserDebugBridge.clearDiagnosis",
+          "when": "view == browserDebugBridge.diagnosis",
+          "group": "navigation"
+        }
+      ]
+    },
     "configuration": {
       "title": "Browser Debug Bridge",
       "properties": {
@@ -60,7 +114,7 @@
     "build": "tsc -p tsconfig.json",
     "watch": "tsc -p tsconfig.json --watch",
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.test.json --noEmit",
-    "test": "tsx --test src/bridge/http-server.test.ts src/bridge/screenshot-store.test.ts src/project/framework.test.ts src/project/package-manager.test.ts src/project/signals.test.ts src/project/workspace.test.ts src/project/scoring.test.ts src/project/excerpts.test.ts src/project/service.test.ts"
+    "test": "tsx --test src/bridge/http-server.test.ts src/bridge/screenshot-store.test.ts src/project/framework.test.ts src/project/package-manager.test.ts src/project/signals.test.ts src/project/workspace.test.ts src/project/scoring.test.ts src/project/excerpts.test.ts src/project/service.test.ts src/ai/serializer.test.ts src/ai/validation.test.ts src/ai/diagnosis.test.ts src/ui/plain-text.test.ts src/ui/evidence-refs.test.ts src/ui/ai-errors.test.ts src/ui/diagnosis-state.test.ts src/ui/diagnosis-tree.test.ts src/ui/open-path.test.ts src/ui/open-candidate.test.ts src/ui/run-diagnosis.test.ts src/ui/notifications.test.ts"
   },
   "dependencies": {
     "@browser-debug-bridge/redaction": "workspace:*",

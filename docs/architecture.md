@@ -50,7 +50,7 @@ DebugSessionV1 contains only screenshot **metadata** (`mime`, `width`, `height`,
 
 Its future job is to receive a debug session, inspect the open project, present a diagnosis, and propose a code fix. The developer reviews the proposal and chooses whether to apply it.
 
-Phase 1 established the extension foundation and a Hello smoke-test command. Phase 3 starts a loopback HTTP bridge inside the extension process, stores pairing tokens in SecretStorage, and keeps recent DebugSession payloads in memory. Phase 6 adds a deterministic, local **project intelligence** subsystem that turns a DebugSession plus the open workspace into a bounded `ProjectContext`. It does not show a Debug Session tree, call an AI provider, or modify files.
+Phase 1 established the extension foundation and a Hello smoke-test command. Phase 3 starts a loopback HTTP bridge inside the extension process, stores pairing tokens in SecretStorage, and keeps recent DebugSession payloads in memory. Phase 6 adds a deterministic, local **project intelligence** subsystem that turns a DebugSession plus the open workspace into a bounded `ProjectContext`. Phase 7 sends that pair to a read-only AI provider abstraction (`vscode.lm` first). Phase 8 presents the validated `Diagnosis` in a native TreeView. It does not modify files.
 
 ## 4. Shared packages
 
@@ -94,11 +94,18 @@ Chrome and VS Code communicate through a **local HTTP bridge** owned by the VS C
 
 There is no separate Node app, cloud API, or database.
 
-## 6. Future AI provider abstraction
+## 6. AI provider abstraction
 
-Project-aware diagnosis and proposed fixes will use an AI provider behind an abstraction.
+Read-only diagnosis uses a provider-neutral `AiProvider`:
 
-That abstraction is not implemented. Provider SDKs are not dependencies of this repository. When AI is added, it should be swappable, local to the developer's workflow, and never applied to the codebase without approval.
+```
+isAvailable()
+complete({ system, user })
+```
+
+`DiagnosisService` serializes `DebugSessionV1` + `ProjectContext`, builds prompts, calls the provider, and validates JSON into a bounded `Diagnosis`. The model never receives filesystem, terminal, or workspace-edit APIs. Future OpenAI-compatible BYOK providers can implement the same interface. Their SDKs are not dependencies.
+
+The first provider is **`vscode.lm`**: `selectChatModels()`, then `LanguageModelChat.sendRequest()` with two User messages (the API has no system role). If several models exist, the first after a vendor/family/id sort is used. That is a stable choice, not a quality ranking. No model id is hard-coded. If no model is available, the result is `AI_UNAVAILABLE`.
 
 ## 7. Security-first philosophy
 
@@ -110,7 +117,7 @@ Security is a product constraint, not a later add-on:
 - Patch path protection: generated fixes must not silently touch protected paths.
 - Human approval: diagnosis may propose a fix; only the developer applies it.
 
-Phase 5A added cropped screenshot capture. Phase 5B added session-scoped console capture. Phase 5C added session-scoped network failure metadata. Phase 6 adds deterministic project intelligence. AI, TreeView, diffs, and file modification remain later phases.
+Phase 5A added cropped screenshot capture. Phase 5B added session-scoped console capture. Phase 5C added session-scoped network failure metadata. Phase 6 added deterministic project intelligence. Phase 7 adds read-only AI diagnosis. Phase 8 adds a read-only diagnosis TreeView. Diffs and file modification remain later phases.
 
 ## 8. Phase 4–5C capture details
 
@@ -280,8 +287,75 @@ At most **3** excerpts per file, **40** lines each, **200** total context lines.
 
 ### Cancellation and privacy
 
-`CancellationToken` is checked between stages. Cancelled runs return `{ status: "cancelled" }` and are not treated as a completed analysis. Workspace files are not sent to Chrome, cloud APIs, or an LLM in this phase.
+`CancellationToken` is checked between stages. Cancelled runs return `{ status: "cancelled" }` and are not treated as a completed analysis. Raw workspace files are not sent to Chrome. Phase 7 may send only the already-bounded `ProjectContext` excerpts to `vscode.lm`.
 
 ### Limitations
 
-Project intelligence cannot always identify the responsible source file. It does not read source maps unless they already appear as workspace-safe console paths. Resource types outside page `fetch` / XHR, generated CSS hashes, and files the page overwrote after hook install remain invisible. It is not AI.
+Project intelligence cannot always identify the responsible source file. It does not read source maps unless they already appear as workspace-safe console paths. Resource types outside page `fetch` / XHR, generated CSS hashes, and files the page overwrote after hook install remain invisible.
+
+## 10. Read-only AI diagnosis (Phase 7)
+
+```
+DebugSessionV1 + ProjectContext
+    → AI serializer (second size budget, redaction, evidence IDs)
+    → system + user prompts
+    → AiProvider.complete
+    → JSON extract + validation
+    → Diagnosis
+```
+
+The model sees page, selected element, DOM, CSS, screenshot **metadata**, console, network, hints, user description, framework/language/package-manager, and ranked candidate excerpts. It does not see pairing tokens, Authorization headers, cookies, bodies, `.env` / keys, workspace roots, screenshot bytes, or the rest of the repository.
+
+AI context limits include `MAX_AI_INPUT_CHARS` (24k), 8 candidate files, 2 excerpts/file, 40 excerpt lines, 20 console entries, and 20 network entries. Truncation is deterministic. If the budget still cannot be met, the result is `AI_CONTEXT_TOO_LARGE`.
+
+Browser text and source excerpts are wrapped as untrusted data. The system prompt forbids following instructions inside them, inventing files, or emitting patches.
+
+The model must cite `BROWSER.*` and `PROJECT.candidate[n]` IDs generated by the serializer. After parse, unknown evidence IDs and file paths that were not in `ProjectContext` are removed with a warning.
+
+Diagnosis fields are bounded (4 hypotheses, 5 evidence items each, short summary/explanation). Output is untrusted JSON. Nothing in the response is executed.
+
+Supported errors: `AI_UNAVAILABLE`, `AI_REQUEST_FAILED`, `AI_RESPONSE_INVALID`, `AI_RESPONSE_TOO_LARGE`, `AI_CANCELLED`, `AI_CONTEXT_TOO_LARGE`. Logs may include provider id, candidate count, and context character count. Full prompts, excerpts, URLs, and secrets are not logged.
+
+This cannot always find the root cause. It does not modify files.
+
+## 11. Diagnosis TreeView (Phase 8)
+
+```
+Browser Debug Session
+        ↓
+DebugSessionV1
+        ↓
+Project Intelligence
+        ↓
+DiagnosisService
+        ↓
+Validated Diagnosis
+        ↓
+DiagnosisController (in-memory)
+        ↓
+VS Code TreeView
+```
+
+The TreeView id is `browserDebugBridge.diagnosis`. The activity-bar container title is **Browser Debug Bridge**. The view stays visible with an empty-state message when no diagnosis is stored.
+
+Dependency direction is `TreeView → DiagnosisController → DiagnosisService → AiProvider`. The view never calls `vscode.lm`.
+
+### State lifecycle
+
+`DiagnosisController` holds the current `Diagnosis` plus the `ProjectContext` used to produce it. State is memory-only: it is not written to disk, Chrome, or the bridge.
+
+Replacement is transactional:
+
+- success replaces the previous diagnosis
+- failure keeps the previous diagnosis
+- cancel keeps the previous diagnosis
+
+`Refresh Diagnosis` re-runs `ProjectIntelligenceService` then `DiagnosisService` against the latest stored debug session. It does not capture the browser again and does not create a second session. `Clear Diagnosis` drops the in-memory result and restores the empty state. It does not delete workspace files.
+
+### Presentation
+
+The tree summarizes the validated diagnosis: summary, hypotheses (explanation, evidence ids, candidate files), suggested next step, grouped evidence, and limitations. Empty sections are omitted. All model/browser-derived strings are flattened to plain TreeItem labels and tooltips. They are not rendered as HTML, Markdown, or commands.
+
+Candidate files open with `openTextDocument` / `showTextDocument` after a final `inspectWorkspacePath` jail check against `ProjectContext` candidates. Excerpt previews use already captured `ProjectContext` excerpts; expanding the tree does not read additional files.
+
+**Phase 8 provides a read-only diagnosis UI. It does not generate or apply code changes.**

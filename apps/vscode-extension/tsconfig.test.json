@@ -10,6 +10,12 @@
     "declarationMap": false,
     "types": ["node"]
   },
-  "include": ["src/bridge/**/*.ts", "src/project/**/*.ts"],
-  "exclude": ["src/project/vscode-access.ts"]
+  "include": ["src/bridge/**/*.ts", "src/project/**/*.ts", "src/ai/**/*.ts", "src/ui/**/*.ts"],
+  "exclude": [
+    "src/project/vscode-access.ts",
+    "src/ai/vscode-lm-provider.ts",
+    "src/ui/diagnosis-tree-item.ts",
+    "src/ui/diagnosis-tree-provider.ts",
+    "src/ui/vscode-open.ts"
+  ]
 }

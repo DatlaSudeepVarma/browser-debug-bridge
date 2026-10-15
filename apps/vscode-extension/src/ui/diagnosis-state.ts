@@ -15,6 +15,7 @@ export type ApplyDiagnosisResult = "replaced" | "preserved";
 export class DiagnosisController {
   private current: DiagnosisViewState | undefined;
   private running = false;
+  private generation = 0;
 
   public getDiagnosis(): DiagnosisViewState | undefined {
     return this.current === undefined
@@ -28,10 +29,16 @@ export class DiagnosisController {
 
   public setDiagnosis(state: DiagnosisViewState): void {
     this.current = state;
+    this.generation += 1;
   }
 
   public clearDiagnosis(): void {
     this.current = undefined;
+    this.generation += 1;
+  }
+
+  public getGeneration(): number {
+    return this.generation;
   }
 
   public applyResult(

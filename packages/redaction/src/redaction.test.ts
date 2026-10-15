@@ -170,6 +170,18 @@ describe("workspace path safety", () => {
     assert.equal(isSafeWorkspacePath(workspace, "credentials.json"), false);
   });
 
+  it("rejects Windows and POSIX absolute, UNC, and device-namespace paths", () => {
+    assert.equal(isSafeWorkspacePath("C:/workspace", "C:/Windows/System32/drivers/etc/hosts"), false);
+    assert.equal(isSafeWorkspacePath("C:/workspace", "C:\\secret.ts"), false);
+    assert.equal(isSafeWorkspacePath("C:/workspace", "\\\\server\\share\\file.ts"), false);
+    assert.equal(isSafeWorkspacePath("C:/workspace", "\\\\?\\C:\\secret.ts"), false);
+    assert.equal(isSafeWorkspacePath("C:/workspace", "C:secret.ts"), false);
+    assert.equal(isSafeWorkspacePath("C:/workspace", "..\\..\\Windows\\System32\\config"), false);
+    assert.equal(isSafeWorkspacePath("/workspace", "/etc/passwd"), false);
+    assert.equal(isSafeWorkspacePath("/workspace", "foo/../../etc/passwd"), false);
+    assert.equal(isSafeWorkspacePath("/workspace", "//server/share/file.ts"), false);
+  });
+
   it("allows safe source paths", () => {
     const inspection = inspectWorkspacePath(
       workspace,

@@ -15,6 +15,7 @@ import {
 import { BODY_WARN_BYTES, BRIDGE_SERVICE_NAME, MAX_BODY_BYTES } from "./constants.js";
 import { isJpegBytes, readBearerToken, sha256Hex, timingSafeEqualText } from "./crypto.js";
 import type { BridgeLogger } from "./logger.js";
+import { RequestReplayCache } from "./replay-cache.js";
 import type { ScreenshotStore } from "./screenshot-store.js";
 import type { SessionStore } from "./session-store.js";
 
@@ -48,12 +49,26 @@ export function isLoopbackAddress(address: string | undefined): boolean {
   return address === "127.0.0.1" || address === "::ffff:127.0.0.1";
 }
 
+const LOOPBACK_HOST_PATTERN = /^127\.0\.0\.1(?::(\d{1,5}))?$/;
+
 export function isLoopbackHostHeader(host: string | undefined): boolean {
   if (host === undefined) {
     return false;
   }
-  const value = host.trim().toLowerCase();
-  return value === "127.0.0.1" || value.startsWith("127.0.0.1:");
+  const match = LOOPBACK_HOST_PATTERN.exec(host.trim().toLowerCase());
+  if (match === null) {
+    return false;
+  }
+  const port = match[1];
+  if (port === undefined) {
+    return true;
+  }
+  const numeric = Number(port);
+  return Number.isInteger(numeric) && numeric >= 1 && numeric <= 65535;
+}
+
+function sessionsMatch(left: DebugSessionV1, right: DebugSessionV1): boolean {
+  return JSON.stringify(left) === JSON.stringify(right);
 }
 
 export function isAllowedOrigin(
@@ -178,6 +193,7 @@ export function createBridgeHandler(options: BridgeHandlerOptions): {
   const pairing: PairingState = { paired: false };
   const maxBodyBytes = options.maxBodyBytes ?? MAX_BODY_BYTES;
   const bodyWarnBytes = options.bodyWarnBytes ?? BODY_WARN_BYTES;
+  const replayCache = new RequestReplayCache();
 
   const listener = (req: IncomingMessage, res: ServerResponse): void => {
     void handleRequest(req, res);
@@ -398,6 +414,50 @@ export function createBridgeHandler(options: BridgeHandlerOptions): {
       return;
     }
     const session = parsed.data.session;
+    const replay = replayCache.check(parsed.data.requestId, session.sessionId);
+    if (replay === "conflict") {
+      options.logger.info("Session rejected: requestId replay conflict");
+      sendError(
+        req,
+        res,
+        400,
+        "INVALID_PROTOCOL",
+        "requestId was already used for a different session.",
+        extensionId,
+        parsed.data.requestId,
+      );
+      return;
+    }
+    const existing = options.store.get(session.sessionId);
+    if (existing !== undefined && !sessionsMatch(existing.session, session)) {
+      options.logger.info("Session rejected: session id conflict");
+      sendError(
+        req,
+        res,
+        400,
+        "INVALID_SESSION",
+        "A debug session with this id already exists.",
+        extensionId,
+        parsed.data.requestId,
+      );
+      return;
+    }
+    if (replay === "idempotent" && existing !== undefined) {
+      sendJson(
+        req,
+        res,
+        200,
+        {
+          protocolVersion: PROTOCOL_VERSION,
+          type: "session.ack",
+          requestId: parsed.data.requestId,
+          sessionId: session.sessionId,
+          accepted: true,
+        },
+        extensionId,
+      );
+      return;
+    }
     if (sessionRequiresJpegBytes(session)) {
       const artifact = options.screenshots.get(session.sessionId);
       if (artifact === undefined || artifact.sha256 !== session.screenshot.sha256) {
@@ -420,6 +480,7 @@ export function createBridgeHandler(options: BridgeHandlerOptions): {
       options.screenshots.delete(evictedId);
     }
     options.screenshots.bind(session.sessionId);
+    replayCache.remember(parsed.data.requestId, session.sessionId);
     options.logger.info(`Session received: ${session.sessionId}`);
     sendJson(
       req,

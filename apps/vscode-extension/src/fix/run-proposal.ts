@@ -9,10 +9,22 @@ export type FixProposalRunOutcome =
   | { status: "preserved"; result: Extract<FixProposalResult, { status: "error" }> }
   | { status: "no-diagnosis" }
   | { status: "cancelled" }
-  | { status: "busy" };
+  | { status: "busy" }
+  | { status: "stale" };
 
 function isCancellationRequested(token?: CancellationTokenLike): boolean {
   return token?.isCancellationRequested === true;
+}
+
+function diagnosisStillCurrent(
+  original: DiagnosisViewState,
+  current: DiagnosisViewState | undefined,
+): boolean {
+  return (
+    current !== undefined &&
+    current.session.sessionId === original.session.sessionId &&
+    diagnosisFingerprint(current.diagnosis) === diagnosisFingerprint(original.diagnosis)
+  );
 }
 
 export async function runFixProposal(
@@ -20,6 +32,7 @@ export async function runFixProposal(
   proposalController: FixProposalController,
   propose: (state: DiagnosisViewState, token?: CancellationTokenLike) => Promise<FixProposalResult>,
   token?: CancellationTokenLike,
+  getCurrentDiagnosis?: () => DiagnosisViewState | undefined,
 ): Promise<FixProposalRunOutcome> {
   if (diagnosis === undefined) {
     return { status: "no-diagnosis" };
@@ -38,6 +51,9 @@ export async function runFixProposal(
       return result.status === "error"
         ? { status: "preserved", result }
         : { status: "cancelled" };
+    }
+    if (getCurrentDiagnosis !== undefined && !diagnosisStillCurrent(diagnosis, getCurrentDiagnosis())) {
+      return { status: "stale" };
     }
     if (result.status === "ok") {
       const identity = {

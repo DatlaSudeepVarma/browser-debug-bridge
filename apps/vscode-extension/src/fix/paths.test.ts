@@ -24,9 +24,46 @@ describe("fix path validation", () => {
   });
 
   it("rejects absolute paths", () => {
-    for (const relativePath of ["/etc/passwd", "C:\\secret.ts", "C:/secret.ts"]) {
+    for (const relativePath of [
+      "/etc/passwd",
+      "C:\\secret.ts",
+      "C:/secret.ts",
+      "\\\\server\\share\\file.ts",
+      "\\\\?\\C:\\secret.ts",
+    ]) {
       const result = validateFixPath(relativePath, project, new Set([relativePath]));
       assert.equal(result.status, "rejected");
+    }
+  });
+
+  it("rejects a canonical symlink escape even when the lexical path looks relative", () => {
+    const realpaths: Record<string, string> = {
+      "/workspace/shop": "/workspace/shop",
+      "/workspace/shop/src": "/workspace/shop/src",
+      "/workspace/shop/src/services": "/workspace/shop/src/services",
+      "/workspace/shop/src/services/checkout.ts": "/etc/passwd",
+    };
+    const io = {
+      exists(target: string): boolean {
+        return target in realpaths;
+      },
+      realpath(target: string): string {
+        const resolved = realpaths[target];
+        if (resolved === undefined) {
+          throw new Error(`missing ${target}`);
+        }
+        return resolved;
+      },
+      join(left: string, right: string): string {
+        return `${left}/${right}`;
+      },
+      sep: "/",
+      ignoreCase: false,
+    };
+    const result = validateFixPath("src/services/checkout.ts", project, allowed, io);
+    assert.equal(result.status, "rejected");
+    if (result.status === "rejected") {
+      assert.equal(result.reason, "outside-workspace");
     }
   });
 

@@ -53,4 +53,8 @@ export class SessionStore {
     }
     return found;
   }
+
+  public clear(): void {
+    this.sessions.clear();
+  }
 }

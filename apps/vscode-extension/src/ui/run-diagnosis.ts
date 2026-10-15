@@ -21,7 +21,8 @@ export type DiagnosisRunOutcome =
   | { status: "no-session" }
   | { status: "no-workspace" }
   | { status: "cancelled" }
-  | { status: "busy" };
+  | { status: "busy" }
+  | { status: "discarded" };
 
 function isCancellationRequested(token?: CancellationTokenLike): boolean {
   return token?.isCancellationRequested === true;
@@ -36,6 +37,7 @@ export async function runDiagnosis(
   if (!controller.beginRun()) {
     return { status: "busy" };
   }
+  const generation = controller.getGeneration();
   try {
     if (isCancellationRequested(token)) {
       return { status: "cancelled" };
@@ -55,6 +57,12 @@ export async function runDiagnosis(
       return { status: "no-workspace" };
     }
     const result = await deps.diagnose(session, analysis.context, token);
+    if (isCancellationRequested(token)) {
+      return { status: "cancelled" };
+    }
+    if (controller.getGeneration() !== generation) {
+      return { status: "discarded" };
+    }
     if (result.status === "ok") {
       options.proposalController?.clear();
       controller.applyResult(result, analysis.context, session);

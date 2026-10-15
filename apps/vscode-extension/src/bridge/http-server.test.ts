@@ -53,6 +53,9 @@ describe("loopback helpers", () => {
     assert.equal(isLoopbackHostHeader("127.0.0.1:17321"), true);
     assert.equal(isLoopbackHostHeader("localhost:17321"), false);
     assert.equal(isLoopbackHostHeader("0.0.0.0:17321"), false);
+    assert.equal(isLoopbackHostHeader("127.0.0.1:17321@evil"), false);
+    assert.equal(isLoopbackHostHeader("127.0.0.1:99999"), false);
+    assert.equal(isLoopbackHostHeader("[::1]:17321"), false);
   });
 });
 
@@ -69,6 +72,13 @@ describe("SessionStore", () => {
     assert.equal(store.get(first.sessionId), undefined);
     assert.ok(store.get(second.sessionId));
     assert.ok(store.get(third.sessionId));
+  });
+
+  it("can clear stored sessions", () => {
+    const store = new SessionStore(4);
+    store.add(createFakeSessionSubmission().session);
+    store.clear();
+    assert.equal(store.size, 0);
   });
 });
 
@@ -285,6 +295,135 @@ describe("BridgeServer HTTP", () => {
     assert.ok(host === "127.0.0.1" || host === "::ffff:127.0.0.1");
   });
 
+  it("rejects a different payload for an existing session id", async () => {
+    const server = await running();
+    const first = createFakeSessionSubmission();
+    const accepted = await fetch(`${baseUrl(server)}/sessions`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${TOKEN}`,
+      },
+      body: JSON.stringify(first),
+    });
+    assert.equal(accepted.status, 200);
+    const second = createFakeSessionSubmission();
+    const conflict = {
+      ...second,
+      session: {
+        ...second.session,
+        sessionId: first.session.sessionId,
+        userDescription: "conflicting payload that must be rejected",
+      },
+    };
+    const response = await fetch(`${baseUrl(server)}/sessions`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${TOKEN}`,
+      },
+      body: JSON.stringify(conflict),
+    });
+    assert.equal(response.status, 400);
+    assert.equal((await parseError(response)).code, "INVALID_SESSION");
+    assert.equal(server.getSession(first.session.sessionId)?.userDescription, first.session.userDescription);
+  });
+
+  it("treats an identical session replay as idempotent", async () => {
+    const server = await running();
+    const submission = createFakeSessionSubmission();
+    const first = await fetch(`${baseUrl(server)}/sessions`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${TOKEN}`,
+      },
+      body: JSON.stringify(submission),
+    });
+    const second = await fetch(`${baseUrl(server)}/sessions`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${TOKEN}`,
+      },
+      body: JSON.stringify(submission),
+    });
+    assert.equal(first.status, 200);
+    assert.equal(second.status, 200);
+    assert.equal(server.sessionCount(), 1);
+  });
+
+  it("rejects a reused requestId for a different session", async () => {
+    const server = await running();
+    const first = createFakeSessionSubmission();
+    const accepted = await fetch(`${baseUrl(server)}/sessions`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${TOKEN}`,
+      },
+      body: JSON.stringify(first),
+    });
+    assert.equal(accepted.status, 200);
+    const second = createFakeSessionSubmission();
+    const replay = { ...second, requestId: first.requestId };
+    const response = await fetch(`${baseUrl(server)}/sessions`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${TOKEN}`,
+      },
+      body: JSON.stringify(replay),
+    });
+    assert.equal(response.status, 400);
+    assert.equal((await parseError(response)).code, "INVALID_PROTOCOL");
+  });
+
+  it("does not log pairing tokens or session JSON", async () => {
+    const lines: string[] = [];
+    const server = await running({
+      logger: {
+        info(message: string): void {
+          lines.push(message);
+        },
+        warn(message: string): void {
+          lines.push(message);
+        },
+      },
+    });
+    const submission = createFakeSessionSubmission();
+    await fetch(`${baseUrl(server)}/sessions`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${TOKEN}`,
+      },
+      body: JSON.stringify(submission),
+    });
+    const joined = lines.join("\n");
+    assert.equal(joined.includes(TOKEN), false);
+    assert.equal(joined.includes(submission.session.userDescription), false);
+    assert.equal(joined.includes("Authorization"), false);
+  });
+
+  it("clears in-memory sessions and screenshots on stop", async () => {
+    const server = await running();
+    const submission = createFakeSessionSubmission();
+    const submit = await fetch(`${baseUrl(server)}/sessions`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${TOKEN}`,
+      },
+      body: JSON.stringify(submission),
+    });
+    assert.equal(submit.status, 200);
+    assert.equal(server.sessionCount(), 1);
+    await server.stop();
+    assert.equal(server.sessionCount(), 0);
+    assert.equal(server.screenshotCount(), 0);
+  });
+
   it("can start and stop repeatedly without duplicate listeners", async () => {
     const server = new BridgeServer({
       extensionVersion: "0.1.0",
@@ -342,6 +481,22 @@ describe("screenshot upload", () => {
     servers.push(server);
     return server;
   }
+
+  it("rejects non-JPEG screenshot bytes", async () => {
+    const server = await running();
+    const sessionId = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee";
+    const response = await fetch(`${baseUrl(server)}/sessions/${sessionId}/screenshot`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "image/jpeg",
+        Authorization: `Bearer ${TOKEN}`,
+      },
+      body: Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a]),
+    });
+    assert.equal(response.status, 400);
+    assert.equal((await parseError(response)).code, "INVALID_PROTOCOL");
+    assert.equal(server.getScreenshot(sessionId), undefined);
+  });
 
   it("rejects unauthorized screenshot uploads", async () => {
     const server = await running();

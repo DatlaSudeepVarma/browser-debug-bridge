@@ -50,4 +50,12 @@ describe("ScreenshotStore", () => {
     assert.equal(store.get("aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeee1"), undefined);
     assert.equal(store.delete("aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeee1"), undefined);
   });
+
+  it("drops all artifacts on clear", () => {
+    const store = new ScreenshotStore(4);
+    store.put(artifact("aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeee1"));
+    store.clear();
+    assert.equal(store.size, 0);
+    assert.equal(store.get("aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeee1"), undefined);
+  });
 });

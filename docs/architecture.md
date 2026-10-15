@@ -48,9 +48,9 @@ DebugSessionV1 contains only screenshot **metadata** (`mime`, `width`, `height`,
 
 `apps/vscode-extension` is a VS Code extension using the official Extension API.
 
-Its future job is to receive a debug session, inspect the open project, present a diagnosis, and propose a code fix. The developer reviews the proposal and chooses whether to apply it.
+Its job is to receive a debug session, inspect the open project, present a diagnosis, and propose a code fix in memory. Native Apply/Reject is not implemented in this tree.
 
-Phase 1 established the extension foundation and a Hello smoke-test command. Phase 3 starts a loopback HTTP bridge inside the extension process, stores pairing tokens in SecretStorage, and keeps recent DebugSession payloads in memory. Phase 6 adds a deterministic, local **project intelligence** subsystem that turns a DebugSession plus the open workspace into a bounded `ProjectContext`. Phase 7 sends that pair to a read-only AI provider abstraction (`vscode.lm` first). Phase 8 presents the validated `Diagnosis` in a native TreeView. Phase 9 turns that diagnosis into an in-memory proposed change and unified diff. It does not modify files.
+Phase 1 established the extension foundation and a Hello smoke-test command. Phase 3 starts a loopback HTTP bridge inside the extension process, stores pairing tokens in SecretStorage, and keeps recent DebugSession payloads in memory. Phase 6 adds a deterministic, local **project intelligence** subsystem that turns a DebugSession plus the open workspace into a bounded `ProjectContext`. Phase 7 sends that pair to a read-only AI provider abstraction (`vscode.lm` first). Phase 8 presents the validated `Diagnosis` in a native TreeView. Phase 9 turns that diagnosis into an in-memory proposed change and unified diff. Phase 11 audited that pipeline and hardened authentication, path, and state-consistency controls. It does not modify files. Native diff review and Apply/Reject were specified after Phase 9 and are **not present** in this tree.
 
 ## 4. Shared packages
 
@@ -115,9 +115,9 @@ Security is a product constraint, not a later add-on:
 - Least privilege: Chrome permissions are storage, `activeTab`, `scripting`, and the existing loopback host permission. `debugger`, `webRequest`, `cookies`, `tabs`, and `<all_urls>` are not requested.
 - Redaction before sharing: URLs, DOM, secrets, and sensitive fields are stripped in `@browser-debug-bridge/redaction` before a session is submitted.
 - Patch path protection: generated fixes must not silently touch protected paths.
-- Human approval: diagnosis may propose a fix; only the developer applies it.
+- Human approval: diagnosis may propose a fix. This tree has **no Apply path**; a developer cannot currently write that proposal through the extension.
 
-Phase 5A added cropped screenshot capture. Phase 5B added session-scoped console capture. Phase 5C added session-scoped network failure metadata. Phase 6 added deterministic project intelligence. Phase 7 adds read-only AI diagnosis. Phase 8 adds a read-only diagnosis TreeView. Phase 9 adds in-memory unified diffs. Applying those diffs remains a later phase.
+Phase 5A added cropped screenshot capture. Phase 5B added session-scoped console capture. Phase 5C added session-scoped network failure metadata. Phase 6 added deterministic project intelligence. Phase 7 adds read-only AI diagnosis. Phase 8 adds a read-only diagnosis TreeView. Phase 9 adds in-memory unified diffs. Phase 11 hardens integration and security around that existing V1 surface. Applying those diffs remains unimplemented.
 
 ## 8. Phase 4–5C capture details
 
@@ -401,3 +401,93 @@ The extension hashes the bounded excerpt representation itself (`originalContent
 ### Read-only behavior
 
 **Phase 9 generates a proposed code change and validated unified diff entirely in memory. It does not modify workspace files.**
+
+## 13. Phase 11 — integration, hardening, and remaining Apply gap
+
+Phase 11 did not add Apply, Reject, native diffs, agents, cloud services, or new providers. It verified the implemented pipeline:
+
+`capture → DebugSessionV1 → loopback bridge → Project Intelligence → DiagnosisService → TreeView → FixProposalService → in-memory unified diff`
+
+and closed demonstrated defects in that pipeline.
+
+### Bridge authentication (implemented)
+
+- Bind: `127.0.0.1` only, port `17321` (tests may use an ephemeral port).
+- Session, screenshot, and ack endpoints require `Authorization: Bearer <256-bit hex pairing token>` compared with a timing-safe equality check.
+- Browser `Origin` must be `chrome-extension://<configured-id>` when an Origin header is present. Requests **without** Origin remain allowed for local curl / VS Code testing (documented exception, not a CORS wildcard).
+- `Host` must be `127.0.0.1` or `127.0.0.1:<1-65535>`. Values such as `127.0.0.1:17321@evil` are rejected.
+- JSON bodies are capped at 5 MB; JPEG screenshot bodies at 1 MB and must start with JPEG magic bytes.
+- At most 20 sessions and 20 screenshot artifacts are retained. Shutdown clears both stores.
+- `requestId` values are cached (bounded). Reusing a `requestId` for a **different** `sessionId` is rejected. Identical retries are idempotent.
+- Submitting a **different** payload under an existing `sessionId` is rejected. The previous session is kept.
+
+Replay protection is **not** a timestamp/nonce scheme. The original protocol has no nonce field; adding one would break Chrome without a schema change. The `requestId` cache is the compatible control. A local process that already possesses the pairing token can still submit new sessions. That is accepted for V1 loopback pairing.
+
+### Workspace / path safety
+
+`inspectWorkspacePath` rejects traversal, NUL bytes, absolute paths outside the folder, UNC / `\\?\` device paths, drive-relative paths such as `C:secret.ts`, `.env*`, keys, PEM files, and credentials files.
+
+Lexical checks do **not** follow symlinks. `inspectCanonicalWorkspaceTarget` walks realpath (or a test double) when the workspace exists on disk and rejects a target whose canonical path leaves the workspace. `validateFixPath` requires the path to be on the diagnosis candidate allowlist **and** to pass both jails.
+
+Windows and POSIX path spellings are tested even when only one OS is available.
+
+### Stale-source and races
+
+Proposal hashes are SHA-256 of the **bounded excerpt representation**, not a live full-file hash. That is enough to invalidate a proposal after a new diagnosis (excerpt set / diagnosis fingerprint change). It is **not** a substitute for an Apply-time re-read of the file.
+
+`DiagnosisController` carries a generation counter. Clearing diagnosis during an in-flight run discards the result (`discarded`). Cancelling after a provider returns success does not apply that success.
+
+`runFixProposal` re-checks the current diagnosis after `await`. If the diagnosis was cleared or replaced, the proposal is `stale` and is not stored. A successful new diagnosis still clears any previous proposal before the new diagnosis is exposed.
+
+### Apply / Reject
+
+There are no Apply or Reject commands, no native diff editor, and no `WorkspaceEdit` usage. Reject-by-not-applying leaves the workspace unchanged because nothing writes it. Future Apply, if added, must:
+
+1. Re-read the target through VS Code APIs
+2. Hash current contents and compare with the trusted original-source hash (full file, not only excerpts)
+3. Confirm the proposal still belongs to the current diagnosis and session
+4. Confirm the diff text has not been mutated
+5. Resolve canonical paths (symlink + jail + allowlist + sensitive-file)
+6. Submit one validated `WorkspaceEdit`
+7. Never report success unless that edit was accepted
+8. Never retry a non-idempotent write automatically
+
+Filesystem-level atomicity of multi-file `WorkspaceEdit` is a VS Code platform limitation and must be documented if Apply is introduced.
+
+### AI data flow
+
+Only `vscode.lm` receives AI-bound data in V1. The model sees serialized DebugSession metadata and bounded project excerpts. It does not receive screenshot bytes, pairing tokens, workspace roots, or arbitrary files. Invalid JSON is rejected. Unknown evidence ids and invented paths are dropped or fail validation rather than being partially trusted.
+
+### Resource bounds
+
+| Resource | Cap |
+| --- | --- |
+| Stored sessions | 20 |
+| Screenshot artifacts | 20, 1 MB JPEG each |
+| Console entries | 50 |
+| Network failure entries | 100 |
+| Discovered source files | 500 |
+| Ranked candidates | 12 |
+| Diagnosis AI input | 24k chars |
+| Concurrent diagnosis | 1 (`beginRun`) |
+| Concurrent proposal | 1 (`beginRun`) |
+
+Completed and cancelled operations must not retain screenshot bytes after bridge stop. Proposal objects live only in `FixProposalController` memory and are dropped on clear, new diagnosis, or extension deactivation.
+
+### Known redaction limitations
+
+Redaction is heuristic. It will miss secrets that do not look like JWTs, named query parameters, or the small sensitive-field list. Screenshots are never OCR'd. Console stacks may still contain file paths. Do not claim perfect secret detection.
+
+### Maintainer security checklist
+
+- [ ] Chrome `permissions` / `host_permissions` unchanged unless a documented requirement exists
+- [ ] No `<all_urls>`, `debugger`, `cookies`, or `webRequest`
+- [ ] Bridge still binds `127.0.0.1` only
+- [ ] Bearer comparison remains timing-safe; pairing token never logged
+- [ ] Origin policy not weakened to make tests pass
+- [ ] Candidate allowlist and source-hash validation not bypassed
+- [ ] No `WorkspaceEdit` / `writeFile` / `fs.writeFile` from proposal or TreeView code
+- [ ] No new AI SDKs, cloud endpoints, or telemetry
+- [ ] Schema/protocol changes ship with compatibility tests
+- [ ] Future Apply must implement canonical path + stale-source re-read before any write
+

@@ -10,7 +10,7 @@
     "declarationMap": false,
     "types": ["node"]
   },
-  "include": ["src/bridge/**/*.ts", "src/project/**/*.ts", "src/ai/**/*.ts", "src/ui/**/*.ts", "src/fix/**/*.ts"],
+  "include": ["src/bridge/**/*.ts", "src/project/**/*.ts", "src/ai/**/*.ts", "src/ui/**/*.ts", "src/fix/**/*.ts", "src/integration/**/*.ts"],
   "exclude": [
     "src/project/vscode-access.ts",
     "src/ai/vscode-lm-provider.ts",

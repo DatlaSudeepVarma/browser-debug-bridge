@@ -1,6 +1,7 @@
 import { inspectWorkspacePath } from "@browser-debug-bridge/redaction";
 import type { ProjectContext } from "../project/types.js";
 import { isSecretOrProtectedFileName, posixBasename } from "../project/workspace.js";
+import { inspectCanonicalWorkspaceTarget, type CanonicalPathIo } from "./canonical-path.js";
 
 export type FixPathRejection = "not-allowed" | "unsafe" | "outside-workspace" | "sensitive";
 
@@ -12,6 +13,7 @@ export function validateFixPath(
   relativePath: string,
   project: ProjectContext,
   allowedPaths: ReadonlySet<string>,
+  io?: CanonicalPathIo,
 ): FixPathResult {
   const candidate = project.candidates.find((item) => item.relativePath === relativePath);
   const workspaceRoot = candidate?.workspaceRoot ?? project.workspaceRoot;
@@ -35,6 +37,10 @@ export function validateFixPath(
   }
   if (!allowedPaths.has(inspection.relativePath) || candidate === undefined) {
     return { status: "rejected", reason: "not-allowed" };
+  }
+  const canonical = inspectCanonicalWorkspaceTarget(workspaceRoot, inspection.relativePath, io);
+  if (canonical.status === "rejected") {
+    return { status: "rejected", reason: canonical.reason };
   }
   return { status: "ok", relativePath: inspection.relativePath };
 }

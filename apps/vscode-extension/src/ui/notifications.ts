@@ -4,8 +4,10 @@ import { userFacingFixError } from "./fix-errors.js";
 import {
   DIAGNOSIS_BUSY_MESSAGE,
   DIAGNOSIS_COMPLETE_MESSAGE,
+  DIAGNOSIS_DISCARDED_MESSAGE,
   FIX_BUSY_MESSAGE,
   FIX_COMPLETE_MESSAGE,
+  FIX_STALE_MESSAGE,
   NO_DIAGNOSIS_FOR_FIX_MESSAGE,
   NO_SESSION_MESSAGE,
   NO_WORKSPACE_MESSAGE,
@@ -33,6 +35,8 @@ export function diagnosisLogLines(outcome: DiagnosisRunOutcome): string[] {
       return ["[AI] No workspace"];
     case "busy":
       return ["[AI] Diagnosis already running"];
+    case "discarded":
+      return ["[AI] Diagnosis discarded because state changed"];
   }
 }
 
@@ -50,6 +54,8 @@ export function diagnosisUserNotice(outcome: DiagnosisRunOutcome): UserNotice {
       return { kind: "warn", message: NO_WORKSPACE_MESSAGE };
     case "busy":
       return { kind: "warn", message: DIAGNOSIS_BUSY_MESSAGE };
+    case "discarded":
+      return { kind: "warn", message: DIAGNOSIS_DISCARDED_MESSAGE };
   }
 }
 
@@ -70,6 +76,8 @@ export function fixProposalLogLines(outcome: FixProposalRunOutcome): string[] {
       return ["[AI] No diagnosis available"];
     case "busy":
       return ["[AI] Fix proposal already running"];
+    case "stale":
+      return ["[AI] Fix proposal discarded because diagnosis changed"];
   }
 }
 
@@ -85,5 +93,7 @@ export function fixProposalUserNotice(outcome: FixProposalRunOutcome): UserNotic
       return { kind: "warn", message: NO_DIAGNOSIS_FOR_FIX_MESSAGE };
     case "busy":
       return { kind: "warn", message: FIX_BUSY_MESSAGE };
+    case "stale":
+      return { kind: "warn", message: FIX_STALE_MESSAGE };
   }
 }

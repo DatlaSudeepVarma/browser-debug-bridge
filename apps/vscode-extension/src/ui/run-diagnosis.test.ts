@@ -120,6 +120,56 @@ describe("diagnosis run transaction", () => {
     assert.equal(controller.getDiagnosis()?.diagnosis.summary, "old");
   });
 
+  it("does not store a successful diagnosis after cancellation during the provider call", async () => {
+    const controller = new DiagnosisController();
+    controller.setDiagnosis({
+      diagnosis: { ...FAKE_DIAGNOSIS, summary: "old" },
+      project: createFixtureAiProjectContext(),
+      session: createFakeDebugSessionV1(),
+      providerId: "old",
+      warnings: [],
+    });
+    const token = new ManualCancellationToken();
+    const outcome = await runDiagnosis(
+      controller,
+      deps({
+        diagnose: async () => {
+          token.cancel();
+          return okResult({ ...FAKE_DIAGNOSIS, summary: "should-not-apply" });
+        },
+      }),
+      { allowCreateSession: false },
+      token,
+    );
+    assert.equal(outcome.status, "cancelled");
+    assert.equal(controller.getDiagnosis()?.diagnosis.summary, "old");
+  });
+
+  it("discards a successful result if diagnosis was cleared during the run", async () => {
+    const controller = new DiagnosisController();
+    const project = createFixtureAiProjectContext();
+    let release!: () => void;
+    const running = runDiagnosis(
+      controller,
+      {
+        ...deps({}),
+        analyze: () =>
+          new Promise((resolve) => {
+            release = () => resolve({ status: "ok", context: project });
+          }),
+      },
+      { allowCreateSession: false },
+    );
+    await new Promise<void>((resolve) => {
+      setImmediate(resolve);
+    });
+    controller.clearDiagnosis();
+    release();
+    const outcome = await running;
+    assert.equal(outcome.status, "discarded");
+    assert.equal(controller.getDiagnosis(), undefined);
+  });
+
   it("does not create a session when refresh has none stored", async () => {
     const controller = new DiagnosisController();
     let created = false;

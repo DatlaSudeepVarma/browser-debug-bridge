@@ -174,6 +174,10 @@ export function inspectWorkspacePath(
     return { safe: false, reason: "empty-path" };
   }
 
+  if (!isAbsolutePath(proposed) && proposed.includes(":")) {
+    return { safe: false, reason: "path-traversal" };
+  }
+
   if (containsTraversal(proposed)) {
     return { safe: false, reason: "path-traversal" };
   }

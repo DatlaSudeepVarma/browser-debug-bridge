@@ -1,6 +1,7 @@
 import type { AiAnalysisResult } from "../ai/types.js";
 import type { DebugSessionV1 } from "@browser-debug-bridge/schema";
 import type { CancellationTokenLike, ProjectContext, ProjectContextResult } from "../project/types.js";
+import type { FixProposalController } from "../fix/proposal-state.js";
 import type { DiagnosisController } from "./diagnosis-state.js";
 
 export interface DiagnosisRunDependencies {
@@ -29,7 +30,7 @@ function isCancellationRequested(token?: CancellationTokenLike): boolean {
 export async function runDiagnosis(
   controller: DiagnosisController,
   deps: DiagnosisRunDependencies,
-  options: { allowCreateSession: boolean },
+  options: { allowCreateSession: boolean; proposalController?: FixProposalController },
   token?: CancellationTokenLike,
 ): Promise<DiagnosisRunOutcome> {
   if (!controller.beginRun()) {
@@ -55,7 +56,8 @@ export async function runDiagnosis(
     }
     const result = await deps.diagnose(session, analysis.context, token);
     if (result.status === "ok") {
-      controller.applyResult(result, analysis.context);
+      options.proposalController?.clear();
+      controller.applyResult(result, analysis.context, session);
       return { status: "replaced", result };
     }
     if (result.error.code === "AI_CANCELLED") {

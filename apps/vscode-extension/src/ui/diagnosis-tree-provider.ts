@@ -1,4 +1,5 @@
 import * as vscode from "vscode";
+import type { FixProposalController } from "../fix/proposal-state.js";
 import type { DiagnosisController } from "./diagnosis-state.js";
 import {
   getChildNodes,
@@ -14,7 +15,10 @@ export class DiagnosisTreeProvider implements vscode.TreeDataProvider<DiagnosisT
   public readonly onDidChangeTreeData = this.emitter.event;
   private view: vscode.TreeView<DiagnosisTreeNode> | undefined;
 
-  public constructor(private readonly controller: DiagnosisController) {}
+  public constructor(
+    private readonly controller: DiagnosisController,
+    private readonly proposalController: FixProposalController,
+  ) {}
 
   public attachView(view: vscode.TreeView<DiagnosisTreeNode>): void {
     this.view = view;
@@ -27,13 +31,14 @@ export class DiagnosisTreeProvider implements vscode.TreeDataProvider<DiagnosisT
 
   public getChildren(element?: DiagnosisTreeNode): DiagnosisTreeNode[] {
     const state = this.controller.getDiagnosis();
+    const proposal = this.proposalController.getTreeState();
     if (element === undefined) {
       return getRootNodes(state);
     }
     if (state === undefined) {
       return [];
     }
-    return getChildNodes(state, element);
+    return getChildNodes(state, element, proposal);
   }
 
   public refresh(): void {

@@ -13,17 +13,26 @@ import { VscodeLmProvider } from "./ai/vscode-lm-provider.js";
 import { ProjectIntelligenceService } from "./project/service.js";
 import { formatProjectIntelligenceSummary } from "./project/summary.js";
 import { createVscodeWorkspaceAccess, wrapVscodeCancellation } from "./project/vscode-access.js";
+import { FixProposalService } from "./fix/proposal.js";
+import { FixProposalController } from "./fix/proposal-state.js";
+import { runFixProposal } from "./fix/run-proposal.js";
 import {
   CLEAR_DIAGNOSIS_COMMAND,
   DIAGNOSE_TEST_SESSION_COMMAND,
   DIAGNOSIS_VIEW_ID,
   OPEN_CANDIDATE_COMMAND,
+  PROPOSE_FIX_COMMAND,
   REFRESH_DIAGNOSIS_COMMAND,
 } from "./ui/constants.js";
 import { DiagnosisController } from "./ui/diagnosis-state.js";
 import { DiagnosisTreeProvider } from "./ui/diagnosis-tree-provider.js";
 import { DIAGNOSIS_CLEARED_MESSAGE } from "./ui/messages.js";
-import { diagnosisLogLines, diagnosisUserNotice } from "./ui/notifications.js";
+import {
+  diagnosisLogLines,
+  diagnosisUserNotice,
+  fixProposalLogLines,
+  fixProposalUserNotice,
+} from "./ui/notifications.js";
 import { openCandidateFile } from "./ui/open-candidate.js";
 import { runDiagnosis, type DiagnosisRunOutcome } from "./ui/run-diagnosis.js";
 import { createVscodeCandidateOpener } from "./ui/vscode-open.js";
@@ -108,7 +117,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   context.subscriptions.push(channel);
 
   const controller = new DiagnosisController();
-  const treeProvider = new DiagnosisTreeProvider(controller);
+  const proposalController = new FixProposalController();
+  const treeProvider = new DiagnosisTreeProvider(controller, proposalController);
   const treeView = vscode.window.createTreeView(DIAGNOSIS_VIEW_ID, {
     treeDataProvider: treeProvider,
     showCollapseAll: true,
@@ -157,7 +167,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
             diagnose: (session, project, diagnoseToken) =>
               new DiagnosisService(new VscodeLmProvider()).diagnose(session, project, diagnoseToken),
           },
-          { allowCreateSession },
+          { allowCreateSession, proposalController },
           token,
         );
         reportDiagnosisOutcome(channel, treeProvider, outcome);
@@ -267,9 +277,40 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       await executeDiagnosis(false);
     }),
     vscode.commands.registerCommand(CLEAR_DIAGNOSIS_COMMAND, () => {
+      proposalController.clear();
       controller.clearDiagnosis();
       treeProvider.refresh();
       void vscode.window.showInformationMessage(DIAGNOSIS_CLEARED_MESSAGE);
+    }),
+    vscode.commands.registerCommand(PROPOSE_FIX_COMMAND, async () => {
+      await vscode.window.withProgress(
+        {
+          location: vscode.ProgressLocation.Notification,
+          title: "Browser Debug Bridge: proposing a fix",
+          cancellable: true,
+        },
+        async (_progress, cancellation) => {
+          const token = wrapVscodeCancellation(cancellation);
+          const outcome = await runFixProposal(
+            controller.getDiagnosis(),
+            proposalController,
+            (state, proposeToken) =>
+              new FixProposalService(new VscodeLmProvider()).propose(
+                state.session,
+                state.project,
+                state.diagnosis,
+                proposeToken,
+              ),
+            token,
+          );
+          for (const line of fixProposalLogLines(outcome)) {
+            channel.appendLine(line);
+          }
+          channel.show(true);
+          treeProvider.refresh();
+          showNotice(fixProposalUserNotice(outcome));
+        },
+      );
     }),
     vscode.commands.registerCommand(OPEN_CANDIDATE_COMMAND, async (relativePath: unknown) => {
       if (typeof relativePath !== "string") {

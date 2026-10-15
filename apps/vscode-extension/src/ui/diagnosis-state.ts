@@ -1,9 +1,11 @@
+import type { DebugSessionV1 } from "@browser-debug-bridge/schema";
 import type { AiAnalysisResult, Diagnosis } from "../ai/types.js";
 import type { ProjectContext } from "../project/types.js";
 
 export interface DiagnosisViewState {
   diagnosis: Diagnosis;
   project: ProjectContext;
+  session: DebugSessionV1;
   providerId: string;
   warnings: string[];
 }
@@ -32,13 +34,18 @@ export class DiagnosisController {
     this.current = undefined;
   }
 
-  public applyResult(result: AiAnalysisResult, project: ProjectContext): ApplyDiagnosisResult {
+  public applyResult(
+    result: AiAnalysisResult,
+    project: ProjectContext,
+    session: DebugSessionV1,
+  ): ApplyDiagnosisResult {
     if (result.status !== "ok") {
       return "preserved";
     }
     this.setDiagnosis({
       diagnosis: result.diagnosis,
       project,
+      session,
       providerId: result.providerId,
       warnings: result.warnings,
     });

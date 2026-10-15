@@ -1,4 +1,6 @@
 import type { Diagnosis, DiagnosisEvidence } from "../ai/types.js";
+import type { StoredProposal } from "../fix/types.js";
+import type { ProposalTreeState } from "../fix/proposal-state.js";
 import type { CandidateFile, ProjectContext } from "../project/types.js";
 import {
   formatEvidenceLabel,
@@ -61,7 +63,21 @@ export type DiagnosisTreeNode =
       relativePath?: string;
     }
   | { kind: "limitations"; id: string; label: string }
-  | { kind: "limitation"; id: string; label: string; tooltip: string };
+  | { kind: "limitation"; id: string; label: string; tooltip: string }
+  | { kind: "proposed-fix"; id: string; label: string }
+  | { kind: "proposal-status"; id: string; label: string; tooltip: string }
+  | { kind: "proposal-summary"; id: string; label: string; tooltip: string }
+  | { kind: "proposal-rationale"; id: string; label: string; tooltip: string }
+  | { kind: "proposal-files"; id: string; label: string }
+  | {
+      kind: "proposal-file";
+      id: string;
+      label: string;
+      tooltip: string;
+      relativePath: string;
+    }
+  | { kind: "proposal-changes"; id: string; label: string }
+  | { kind: "proposal-diff"; id: string; label: string; tooltip: string };
 
 export function getRootNodes(state: DiagnosisViewState | undefined): DiagnosisTreeNode[] {
   if (state === undefined) {
@@ -100,12 +116,18 @@ export function getRootNodes(state: DiagnosisViewState | undefined): DiagnosisTr
       label: `Limitations (${String(diagnosis.limitations.length)})`,
     });
   }
+  nodes.push({
+    kind: "proposed-fix",
+    id: "proposed-fix",
+    label: "Proposed Fix",
+  });
   return nodes;
 }
 
 export function getChildNodes(
   state: DiagnosisViewState,
   node: DiagnosisTreeNode,
+  proposal?: ProposalTreeState,
 ): DiagnosisTreeNode[] {
   switch (node.kind) {
     case "hypotheses":
@@ -157,13 +179,17 @@ export function getChildNodes(
         label: asPlainTreeText(limitation),
         tooltip: asPlainTooltip(limitation),
       }));
+    case "proposed-fix":
+      return proposedFixChildren(proposal);
+    case "proposal-files":
+      return proposalFileNodes(proposal?.proposal);
     default:
       return [];
   }
 }
 
 export function openableRelativePath(node: DiagnosisTreeNode): string | undefined {
-  if (node.kind === "candidate" || node.kind === "candidate-group") {
+  if (node.kind === "candidate" || node.kind === "candidate-group" || node.kind === "proposal-file") {
     return node.relativePath;
   }
   if (node.kind === "excerpt") {
@@ -184,13 +210,18 @@ export function nodeCanHaveChildren(node: DiagnosisTreeNode): boolean {
     case "project-evidence":
     case "candidate-group":
     case "limitations":
+    case "proposed-fix":
+    case "proposal-files":
       return true;
     default:
       return false;
   }
 }
 
-export function collectTreeNodes(state: DiagnosisViewState | undefined): DiagnosisTreeNode[] {
+export function collectTreeNodes(
+  state: DiagnosisViewState | undefined,
+  proposal?: ProposalTreeState,
+): DiagnosisTreeNode[] {
   if (state === undefined) {
     return [];
   }
@@ -198,7 +229,7 @@ export function collectTreeNodes(state: DiagnosisViewState | undefined): Diagnos
   const walk = (current: DiagnosisTreeNode[]): void => {
     for (const node of current) {
       nodes.push(node);
-      walk(getChildNodes(state, node));
+      walk(getChildNodes(state, node, proposal));
     }
   };
   walk(getRootNodes(state));
@@ -381,6 +412,92 @@ function collectEvidence(diagnosis: Diagnosis, project: ProjectContext): Diagnos
     }
   }
   return refs;
+}
+
+function proposedFixChildren(proposal?: ProposalTreeState): DiagnosisTreeNode[] {
+  const nodes: DiagnosisTreeNode[] = [
+    {
+      kind: "proposal-status",
+      id: "proposal-status",
+      label: proposalStatusLabel(proposal),
+      tooltip: proposalStatusTooltip(proposal),
+    },
+  ];
+  const stored = proposal?.proposal;
+  if (stored === undefined) {
+    return nodes;
+  }
+  nodes.push(
+    {
+      kind: "proposal-summary",
+      id: "proposal-summary",
+      label: asPlainTreeText(stored.proposedChange.summary),
+      tooltip: asPlainTooltip(stored.proposedChange.summary),
+    },
+    {
+      kind: "proposal-rationale",
+      id: "proposal-rationale",
+      label: asPlainTreeText(stored.proposedChange.rationale),
+      tooltip: asPlainTooltip(stored.proposedChange.rationale),
+    },
+    {
+      kind: "proposal-files",
+      id: "proposal-files",
+      label: `Files (${String(stored.diff.fileCount)})`,
+    },
+    {
+      kind: "proposal-changes",
+      id: "proposal-changes",
+      label: `${String(editCount(stored))} edit${editCount(stored) === 1 ? "" : "s"}`,
+    },
+    {
+      kind: "proposal-diff",
+      id: "proposal-diff",
+      label: "Ready for review",
+      tooltip: "Unified diff generated in memory. No workspace files were changed.",
+    },
+  );
+  return nodes;
+}
+
+function proposalFileNodes(stored: StoredProposal | undefined): DiagnosisTreeNode[] {
+  if (stored === undefined) {
+    return [];
+  }
+  return stored.proposedChange.changes.map((change, index) => ({
+    kind: "proposal-file" as const,
+    id: `proposal-file:${String(index)}`,
+    label: asPlainTreeText(change.relativePath),
+    tooltip: asPlainTooltip(change.relativePath),
+    relativePath: change.relativePath,
+  }));
+}
+
+function proposalStatusLabel(proposal?: ProposalTreeState): string {
+  if (proposal?.generating === true) {
+    return "Status: Generating";
+  }
+  if (proposal?.proposal !== undefined) {
+    return "Status: Ready";
+  }
+  if (proposal?.lastOutcome === "failed") {
+    return "Status: Failed";
+  }
+  if (proposal?.lastOutcome === "cancelled") {
+    return "Status: Cancelled";
+  }
+  return "Status: Not generated";
+}
+
+function proposalStatusTooltip(proposal?: ProposalTreeState): string {
+  if (proposal?.proposal !== undefined) {
+    return "In-memory proposed change. It has not been applied.";
+  }
+  return 'Run "Browser Debug Bridge: Propose Fix" to generate a suggested change.';
+}
+
+function editCount(stored: StoredProposal): number {
+  return stored.proposedChange.changes.reduce((total, change) => total + change.edits.length, 0);
 }
 
 function hypothesisIndexFromId(id: string): number {

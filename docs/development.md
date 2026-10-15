@@ -143,6 +143,7 @@ The token lives in VS Code `SecretStorage` (`browserDebugBridge.pairingToken`) a
 | Browser Debug Bridge: Diagnose Test Session | Run project intelligence, then a read-only `vscode.lm` diagnosis, and show it in the TreeView |
 | Browser Debug Bridge: Refresh Diagnosis | Re-run diagnosis against the latest stored debug session (does not create a session) |
 | Browser Debug Bridge: Clear Diagnosis | Drop the in-memory diagnosis and restore the TreeView empty state |
+| Browser Debug Bridge: Propose Fix | Generate an in-memory proposed change and unified diff from the current diagnosis |
 
 ### Fake session testing
 
@@ -349,3 +350,21 @@ The TreeView is a presentation layer over `DiagnosisService`. Expanding nodes do
 9. If no stored session exists, Refresh should warn `No debug session available. Start a browser debugging session first.`
 
 Unit tests under `apps/vscode-extension/src/ui/` cover controller state, tree construction, empty-section omission, candidate path jail, missing files, transactional replacement, AI error mapping, and plain-text labels. They do not import `vscode`.
+
+### Phase 9 in-memory proposed fix
+
+Phase 9 generates a proposed code change and validated unified diff entirely in memory. It does not modify workspace files.
+
+The command uses the current diagnosis only. It does not recapture Chrome, create a session, or run diagnosis automatically.
+
+1. Open a workspace in the Extension Development Host.
+2. Run **Diagnose Test Session** and confirm the TreeView has a diagnosis.
+3. Command Palette → **Browser Debug Bridge: Propose Fix**.
+4. Confirm **Proposed Fix** shows summary, rationale, candidate file(s), and `Ready for review`.
+5. Confirm the proposed path is a validated candidate.
+6. Inspect the workspace file and confirm its contents are unchanged.
+7. Run the command again and confirm still no file writes.
+8. Clear diagnosis and confirm the proposal is cleared too.
+9. If no diagnosis exists, the command warns `Run diagnosis before proposing a fix.`
+
+Unit tests under `apps/vscode-extension/src/fix/` cover fix-context serialization, path jail, proposal validation, unified diff generation, stale-source rejection, provider errors, cancellation, and diagnosis invalidation. They use `FakeAiProvider` and do not call a real model.

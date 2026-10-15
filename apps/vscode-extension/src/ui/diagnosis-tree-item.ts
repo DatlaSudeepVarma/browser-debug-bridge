@@ -24,7 +24,7 @@ export function toDiagnosisTreeItem(node: DiagnosisTreeNode, hasChildren: boolea
 }
 
 function candidatePath(node: DiagnosisTreeNode): string | undefined {
-  if (node.kind === "candidate" || node.kind === "candidate-group") {
+  if (node.kind === "candidate" || node.kind === "candidate-group" || node.kind === "proposal-file") {
     return node.relativePath;
   }
   if (node.kind === "excerpt") {

@@ -50,7 +50,7 @@ DebugSessionV1 contains only screenshot **metadata** (`mime`, `width`, `height`,
 
 Its future job is to receive a debug session, inspect the open project, present a diagnosis, and propose a code fix. The developer reviews the proposal and chooses whether to apply it.
 
-Phase 1 established the extension foundation and a Hello smoke-test command. Phase 3 starts a loopback HTTP bridge inside the extension process, stores pairing tokens in SecretStorage, and keeps recent DebugSession payloads in memory. Phase 6 adds a deterministic, local **project intelligence** subsystem that turns a DebugSession plus the open workspace into a bounded `ProjectContext`. Phase 7 sends that pair to a read-only AI provider abstraction (`vscode.lm` first). Phase 8 presents the validated `Diagnosis` in a native TreeView. It does not modify files.
+Phase 1 established the extension foundation and a Hello smoke-test command. Phase 3 starts a loopback HTTP bridge inside the extension process, stores pairing tokens in SecretStorage, and keeps recent DebugSession payloads in memory. Phase 6 adds a deterministic, local **project intelligence** subsystem that turns a DebugSession plus the open workspace into a bounded `ProjectContext`. Phase 7 sends that pair to a read-only AI provider abstraction (`vscode.lm` first). Phase 8 presents the validated `Diagnosis` in a native TreeView. Phase 9 turns that diagnosis into an in-memory proposed change and unified diff. It does not modify files.
 
 ## 4. Shared packages
 
@@ -117,7 +117,7 @@ Security is a product constraint, not a later add-on:
 - Patch path protection: generated fixes must not silently touch protected paths.
 - Human approval: diagnosis may propose a fix; only the developer applies it.
 
-Phase 5A added cropped screenshot capture. Phase 5B added session-scoped console capture. Phase 5C added session-scoped network failure metadata. Phase 6 added deterministic project intelligence. Phase 7 adds read-only AI diagnosis. Phase 8 adds a read-only diagnosis TreeView. Diffs and file modification remain later phases.
+Phase 5A added cropped screenshot capture. Phase 5B added session-scoped console capture. Phase 5C added session-scoped network failure metadata. Phase 6 added deterministic project intelligence. Phase 7 adds read-only AI diagnosis. Phase 8 adds a read-only diagnosis TreeView. Phase 9 adds in-memory unified diffs. Applying those diffs remains a later phase.
 
 ## 8. Phase 4–5C capture details
 
@@ -359,3 +359,45 @@ The tree summarizes the validated diagnosis: summary, hypotheses (explanation, e
 Candidate files open with `openTextDocument` / `showTextDocument` after a final `inspectWorkspacePath` jail check against `ProjectContext` candidates. Excerpt previews use already captured `ProjectContext` excerpts; expanding the tree does not read additional files.
 
 **Phase 8 provides a read-only diagnosis UI. It does not generate or apply code changes.**
+
+## 12. Proposed fix and unified diff (Phase 9)
+
+```
+DiagnosisService
+      ↓
+Diagnosis
+      ↓
+FixProposalService
+      ↓
+ProposedChange
+      ↓
+DiffService
+      ↓
+ValidatedUnifiedDiff
+```
+
+`FixProposalService` reuses the existing `AiProvider`. It does not call `vscode.lm` from the TreeView and does not add a second provider stack.
+
+The model returns structured JSON edits (`relativePath`, `startLine`, `endLine`, `replacement`). The extension validates that JSON, then generates a unified diff in process. It does not run `git`, spawn a shell, or write files.
+
+### Fix-context boundary
+
+The fix prompt is a separate budget from diagnosis serialization. It includes the validated diagnosis, a small amount of browser evidence, and at most three diagnosis-referenced candidate files with already captured excerpts. If those excerpts are missing, the result is `AI_FIX_CONTEXT_INSUFFICIENT`. The model cannot request more files.
+
+### Candidate allowlist
+
+Every proposed path must survive:
+
+1. `ProjectContext` / serialized-context allowlist
+2. `inspectWorkspacePath()` workspace jail
+3. sensitive-file rejection (`.env`, keys, credentials, pem)
+
+Unsafe proposals are rejected. They are not truncated.
+
+### Stale-source protection
+
+The extension hashes the bounded excerpt representation itself (`originalContentHash`, plus session/diagnosis fingerprints). Model-supplied hashes are ignored. A proposal built from content A is invalid against content B. A new successful diagnosis clears any previous proposal before the new diagnosis is shown. Clearing diagnosis also clears the proposal.
+
+### Read-only behavior
+
+**Phase 9 generates a proposed code change and validated unified diff entirely in memory. It does not modify workspace files.**

@@ -16,7 +16,13 @@ export const NO_DIAGNOSIS_FOR_FIX_MESSAGE = "Run diagnosis before proposing a fi
 
 export const FIX_BUSY_MESSAGE = "A fix proposal is already running.";
 
+export const DIAGNOSIS_DISCARDED_MESSAGE =
+  "The diagnosis was cleared before it finished. No new diagnosis was stored.";
+
 export const FIX_COMPLETE_MESSAGE = "In-memory proposed change ready. No workspace files were modified.";
+
+export const FIX_STALE_MESSAGE =
+  "The diagnosis changed before the proposal was ready. Propose a fix again.";
 
 export const UNSAFE_CANDIDATE_MESSAGE = "That file path is not a validated diagnosis candidate.";
 

@@ -134,6 +134,8 @@ export class BridgeServer {
       }
       server.close((error) => {
         this.server = undefined;
+        this.store.clear();
+        this.screenshots.clear();
         if (error) {
           reject(error);
           return;

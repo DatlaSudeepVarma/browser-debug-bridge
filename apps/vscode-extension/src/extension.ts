@@ -302,6 +302,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
                 proposeToken,
               ),
             token,
+            () => controller.getDiagnosis(),
           );
           for (const line of fixProposalLogLines(outcome)) {
             channel.appendLine(line);

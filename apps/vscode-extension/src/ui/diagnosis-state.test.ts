@@ -33,8 +33,10 @@ describe("diagnosis controller state", () => {
   it("clears the in-memory diagnosis without touching files", () => {
     const controller = new DiagnosisController();
     controller.setDiagnosis(sampleState());
+    const generation = controller.getGeneration();
     controller.clearDiagnosis();
     assert.equal(controller.getDiagnosis(), undefined);
+    assert.equal(controller.getGeneration() > generation, true);
   });
 
   it("replaces only on a successful analysis result", () => {

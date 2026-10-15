@@ -8,22 +8,54 @@ Browser Debug Bridge is a **local-first** developer tool. It is designed to take
 
 The intended flow is:
 
-Chrome → browser debugging session → local bridge → VS Code → project-aware diagnosis → proposed code fix → developer approval → apply
+```text
+Chrome element picker
+        ↓
+Bounded DOM/CSS capture
+        ↓
+Screenshot capture
+        ↓
+Console and network failure capture
+        ↓
+DebugSessionV1
+        ↓
+Authenticated local bridge
+        ↓
+Project Intelligence
+        ↓
+AI Diagnosis
+        ↓
+VS Code TreeView
+        ↓
+AI Fix Proposal
+        ↓
+Validated Unified Diff
+        ↓
+Native VS Code Diff        (not implemented)
+        ↓
+Explicit Apply / Reject    (not implemented)
+        ↓
+Validated workspace modification
+        ↓
+Developer verifies the result
+```
 
-No cloud backend is part of V1. The product stays on the developer's machine.
+No cloud backend is part of V1. Session metadata stays on the developer's machine except for the configured AI provider (`vscode.lm`).
 
 ## Current development status
 
-This repository is in **early development (Phase 9)**.
+This repository is in **early development (Phase 11)**. Phases 1–9 are implemented. Phase 10 (native VS Code diff UI, explicit Apply/Reject, and workspace writes) was **not implemented**. Phase 11 audited the existing tree, hardened security and state races, and added integration tests.
 
-Phase 1 scaffolded the monorepo. Phase 2 added the shared schema and redaction packages. Phase 3 added a local loopback HTTP bridge. Phase 4 added a session-scoped element picker and bounded DOM/CSS capture. Phase 5A added a cropped JPEG screenshot of the selected element's visible region, stored out of band from DebugSession JSON. Phase 5B added session-scoped console capture. Phase 5C added session-scoped network **failure metadata**. Phase 6 added a deterministic VS Code **project intelligence** foundation. Phase 7 added a **read-only AI diagnosis** behind a provider abstraction, using `vscode.lm` as the first provider. Phase 8 added a native VS Code **TreeView** so a developer can inspect that diagnosis without changing files. Phase 9 adds an in-memory **proposed code change** and **validated unified diff**.
+The following are **not implemented**:
 
-The following are **not implemented yet**:
-
-- WebSocket events
-- Applying patches / writing workspace files
 - Native VS Code diff UI
+- Apply / Reject commands
+- Any `WorkspaceEdit` / `writeFile` path
+- WebSocket events
 - Screenshot bytes sent to a multimodal model
+- Marketplace publication
+
+Do not treat this tree as production-ready. See [docs/architecture.md](docs/architecture.md) for the security checklist and remaining risks.
 
 ## Architecture overview
 
@@ -31,7 +63,7 @@ The repository is a pnpm + TypeScript monorepo:
 
 | Area | Role |
 | --- | --- |
-| Chrome extension | Manifest V3 extension: pair, pick an element, capture a cropped JPEG, session-scoped console, and network failure metadata, submit a sanitized DebugSession |
+| Chrome extension | Manifest V3: pair, pick an element, capture a cropped JPEG, session-scoped console and network failure metadata, submit a sanitized DebugSession |
 | VS Code extension | Owns the local loopback HTTP bridge, project intelligence, read-only AI diagnosis, diagnosis TreeView, and in-memory fix proposals |
 | `@browser-debug-bridge/schema` | DebugSession V1 and protocol message Zod schemas |
 | `@browser-debug-bridge/redaction` | URL, DOM, text, and workspace-path sanitization |
@@ -56,53 +88,57 @@ browser-debug-bridge/
 └── tsconfig.base.json
 ```
 
-## Development setup
-
-Requirements:
+## Supported environment
 
 - Node.js 20 or later
 - pnpm 9 or later
+- Google Chrome (Manifest V3 unpacked extension)
+- Visual Studio Code 1.90 or later (Extension Development Host)
+- A `vscode.lm` language model for live diagnosis/proposals (tests use `FakeAiProvider`)
+
+Chrome permissions remain `storage`, `activeTab`, `scripting`, plus host permission `http://127.0.0.1:17321/*`. There is no `<all_urls>`, `debugger`, `cookies`, or `webRequest` permission.
+
+## Development setup
 
 ```bash
 pnpm install
 pnpm typecheck
 pnpm build
 pnpm test
+pnpm lint
 ```
 
-Full commands are in [docs/development.md](docs/development.md).
+Full commands, pairing, packaging, and manual checks are in [docs/development.md](docs/development.md).
 
-## Current Phase 9 scope
+## Current V1 scope
 
 - Session-scoped element picker on the current tab (`activeTab` + `scripting`)
-- Bounded selected-element, DOM, and computed-CSS capture
-- Cropped JPEG screenshot of the selected visible region (max 1600×1200, ~1 MB)
-- Session-scoped console capture (most recent 50 entries) into `DebugSessionV1.console[]`
-- Session-scoped network failure metadata (most recent 100 entries) into `DebugSessionV1.network[]` — not a HAR recorder
-- Screenshot bytes uploaded to `POST /sessions/:sessionId/screenshot` (not embedded in DebugSession JSON)
-- Shared redaction + schema validation before `session.submit`
-- Existing local HTTP bridge with in-memory session and screenshot stores
-- Deterministic VS Code project intelligence: workspace-jailed discovery, framework/package-manager hints, ranked candidate files, bounded excerpts
-
+- Bounded selected-element, DOM, and computed-CSS capture with shared redaction
+- Cropped JPEG screenshot of the selected visible region (max 1600×1200, ~1 MB), uploaded separately from session JSON
+- Session-scoped console capture (most recent 50 entries)
+- Session-scoped network **failure metadata** (most recent 100 entries) — not a HAR recorder
+- Local HTTP bridge on `127.0.0.1:17321` with Bearer pairing, Origin checks, body limits, session/screenshot caps, requestId replay cache, and duplicate-session rejection
+- Deterministic project intelligence: workspace-jailed discovery, ranked candidate files, bounded excerpts
 - Read-only AI diagnosis from `DebugSessionV1` + bounded `ProjectContext` only
-- `vscode.lm` provider behind a swappable `AiProvider` interface
-- Prompt-injection framing, evidence IDs, candidate-file validation, and a second AI size budget
-- Native VS Code TreeView (`browserDebugBridge.diagnosis`) that presents the validated `Diagnosis`
-- In-memory diagnosis state with refresh/clear commands and workspace-jailed candidate navigation
-- Diagnosis-aware fix proposals through the existing `AiProvider` (`vscode.lm`)
-- Candidate-allowlisted, size-bounded JSON edits converted into a validated unified diff in memory
+- Native VS Code TreeView (`browserDebugBridge.diagnosis`)
+- In-memory proposed change + validated unified diff, candidate-allowlisted and size-bounded
 
-This is **not** a full-repository scan, not a file-modifying agent, and **not** a guarantee of the correct root cause.
+**Generating a diagnosis, proposal, or unified diff does not modify workspace files.** There is no Apply path in this tree.
 
-**Phase 9 generates a proposed code change and validated unified diff entirely in memory. It does not modify workspace files.**
+## Security and privacy boundaries
 
-WebSocket events, native diff UI, Apply/Reject, and patch application are not part of this phase.
+- Chrome talks only to `http://127.0.0.1:17321`. It does not send capture data to an unapproved remote service.
+- Pairing tokens live in VS Code `SecretStorage` and Chrome `storage.local`. They are not placed in DebugSession payloads or logs.
+- Authorization headers, cookies, request/response bodies, and unrelated storage are not captured.
+- Screenshot bytes are stored in memory, out of band from session JSON, and are not sent to the model.
+- Heuristic redaction is **not** perfect secret detection. JWTs, obvious API-key query names, and a small set of sensitive field names are redacted; unknown secrets can still appear in DOM text, console messages, or screenshots.
+- `inspectWorkspacePath` is a lexical jail. Canonical/realpath checks run on proposed fix paths when the workspace exists on disk. Lexical checks alone do not stop symlink attacks; that is why canonical inspection exists.
+- Native Apply is absent, so the product cannot currently write a proposed patch. Future Apply must re-read the file, compare `originalContentHash`, and refuse stale or escaped targets.
 
-## Future roadmap
+## V1 exclusions
 
-Later phases are expected to add, in order:
+Autonomous agents, automatic code fixing without approval, cloud backends, team collaboration, browsers other than Chrome, extra AI provider SDKs, screenshot vision, full HAR recording, arbitrary workspace scanning, and marketplace publication.
 
-1. Native VS Code diff review with explicit developer Apply/Reject
-2. Optional screenshot-to-model vision
+## License
 
-Do not assume any of those capabilities exist in the current tree.
+Private / unlicensed while the project is in early development.

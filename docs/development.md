@@ -368,3 +368,73 @@ The command uses the current diagnosis only. It does not recapture Chrome, creat
 9. If no diagnosis exists, the command warns `Run diagnosis before proposing a fix.`
 
 Unit tests under `apps/vscode-extension/src/fix/` cover fix-context serialization, path jail, proposal validation, unified diff generation, stale-source rejection, provider errors, cancellation, and diagnosis invalidation. They use `FakeAiProvider` and do not call a real model.
+
+### Phase 11 integration and security
+
+Phase 11 adds automated tests under `apps/vscode-extension/src/integration/` and extra bridge / path tests. They use fake sessions, `MemoryWorkspaceAccess`, and `FakeAiProvider`. They do **not** launch Chrome or the Extension Development Host.
+
+Covered automatically:
+
+- Fake DebugSession → local bridge → project intelligence → fake diagnosis → in-memory proposal → validated unified diff
+- Proposal generation / clear (reject-by-not-applying) does not change fixture-project files on disk
+- Invalid token, invalid Origin, malformed JSON, oversized bodies, non-JPEG screenshot bytes
+- Path traversal, absolute / UNC / `\\?\` / drive-relative paths, candidate allowlist, invented model paths
+- Canonical symlink escape (in-memory IO plus a real temp-dir symlink when the OS allows it)
+- `requestId` replay conflict and identical-session idempotency
+- Stale diagnosis/proposal races and cancellation that must not store a success
+- Prompt-injection text in browser evidence and source comments remains untrusted data
+
+Not covered automatically (requires Chrome + Extension Development Host):
+
+- Element picker start/cancel, overlay, navigation, and tab-close cleanup
+- `captureVisibleTab` crop geometry
+- MAIN-world console / network hooks
+- Pairing through the Chrome popup and VS Code SecretStorage UI
+- `vscode.lm` live diagnosis
+- TreeView click-to-open in the real editor
+- Apply / Reject / native diff (those commands do not exist)
+
+Do not claim an end-to-end browser/VS Code walkthrough passed if only `pnpm test` was run.
+
+## Packaging and install (development)
+
+There is no marketplace listing and no `vsce package` script in this repository.
+
+**Chrome (unpacked)**
+
+1. `pnpm build:chrome`
+2. Chrome → `chrome://extensions` → Developer mode → Load unpacked → `apps/chrome-extension/dist`
+3. Copy the extension ID into VS Code setting `browserDebugBridge.chromeExtensionId`
+
+**VS Code (Extension Development Host)**
+
+1. `pnpm build:vscode` (or use the workspace launch config)
+2. Run **Run Extension** from `.vscode/launch.json`
+3. Command Palette → **Browser Debug Bridge: Show Pairing Code**
+4. Paste the token into the Chrome popup and pair
+5. Open a workspace folder before diagnosing
+
+Do not commit `.env`, pairing tokens, or `*.vsix` artifacts.
+
+## Troubleshooting
+
+| Symptom | What to check |
+| --- | --- |
+| Bridge unavailable | `127.0.0.1:17321` in use, or the extension failed to activate. Output channel: Browser Debug Bridge. |
+| Pairing / 401 | Token mismatch, unpaired Chrome storage, or a stale token after SecretStorage reset. |
+| Origin 403 | `browserDebugBridge.chromeExtensionId` does not match `chrome://extensions`. |
+| Invalid debugging session | Schema validation failed (oversized DOM, bad screenshot hash, missing JPEG upload). |
+| Screenshot upload failure | Body not JPEG, over 1 MB, or hash mismatch with session metadata. |
+| Project context unavailable | No workspace folder, or analysis cancelled. |
+| AI provider unavailable | No `vscode.lm` model. Tests use `FakeAiProvider` and will not reproduce this. |
+| AI response invalid | Model JSON failed validation; previous diagnosis/proposal is kept. |
+| Fix context insufficient | Diagnosis candidates have no bounded excerpts. |
+| Proposed change too large / invalid diff | Size or hunk validation failed; nothing is written. |
+| Cancellation | In-flight AI work dropped; success is not stored. |
+| Missing debug session | Capture or **Create Test Session** first. Refresh Diagnosis does not invent a session. |
+
+User notifications never include stack traces, pairing tokens, prompts, source excerpts, or raw model text. Those details also stay out of the Output channel except for provider id, counts, and error codes.
+
+## Security notes for tests
+
+Do not weaken Origin, Bearer, allowlist, or hash checks to make a test pass. Integration tests must use temporary or in-memory fixtures — never write into the developer's real workspace. The on-disk `test-fixtures/fixture-project` files are hashed before and after workflow tests to prove they were not modified.

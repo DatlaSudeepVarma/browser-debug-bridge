@@ -91,6 +91,42 @@ describe("fix proposal state", () => {
     assert.equal(controller.getProposal(), undefined);
   });
 
+  it("does not store a proposal after the diagnosis is cleared during generation", async () => {
+    const diagnosis = new DiagnosisController();
+    const proposal = new FixProposalController();
+    const state = fixtureDiagnosisState();
+    diagnosis.setDiagnosis(state);
+    let release!: () => void;
+    const running = runFixProposal(
+      diagnosis.getDiagnosis(),
+      proposal,
+      async () =>
+        new Promise((resolve) => {
+          release = () => {
+            void successfulProposal().then((stored) => {
+              resolve({
+                status: "ok",
+                providerId: "fake",
+                contextChars: 12,
+                fileCount: 1,
+                proposal: stored,
+              });
+            });
+          };
+        }),
+      undefined,
+      () => diagnosis.getDiagnosis(),
+    );
+    await new Promise<void>((resolve) => {
+      setImmediate(resolve);
+    });
+    diagnosis.clearDiagnosis();
+    release();
+    const outcome = await running;
+    assert.equal(outcome.status, "stale");
+    assert.equal(proposal.getProposal(), undefined);
+  });
+
   it("invalidates the old proposal before a new diagnosis is exposed", async () => {
     const diagnosis = new DiagnosisController();
     const proposal = new FixProposalController();

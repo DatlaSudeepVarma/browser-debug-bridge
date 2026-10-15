@@ -61,6 +61,10 @@ export class ScreenshotStore {
     return SCREENSHOT_LIMITS.maxBytes;
   }
 
+  public clear(): void {
+    this.artifacts.clear();
+  }
+
   private oldestPendingId(): string | undefined {
     for (const [sessionId, artifact] of this.artifacts) {
       if (!artifact.bound) {

@@ -1,7 +1,12 @@
+import type { FixProposalRunOutcome } from "../fix/run-proposal.js";
 import { userFacingAiError } from "./ai-errors.js";
+import { userFacingFixError } from "./fix-errors.js";
 import {
   DIAGNOSIS_BUSY_MESSAGE,
   DIAGNOSIS_COMPLETE_MESSAGE,
+  FIX_BUSY_MESSAGE,
+  FIX_COMPLETE_MESSAGE,
+  NO_DIAGNOSIS_FOR_FIX_MESSAGE,
   NO_SESSION_MESSAGE,
   NO_WORKSPACE_MESSAGE,
 } from "./messages.js";
@@ -45,5 +50,40 @@ export function diagnosisUserNotice(outcome: DiagnosisRunOutcome): UserNotice {
       return { kind: "warn", message: NO_WORKSPACE_MESSAGE };
     case "busy":
       return { kind: "warn", message: DIAGNOSIS_BUSY_MESSAGE };
+  }
+}
+
+export function fixProposalLogLines(outcome: FixProposalRunOutcome): string[] {
+  switch (outcome.status) {
+    case "replaced":
+      return [
+        `[AI] Provider: ${outcome.result.providerId}`,
+        `[AI] Fix files: ${String(outcome.result.fileCount)}`,
+        `[AI] Context chars: ${String(outcome.result.contextChars)}`,
+        "[AI] Fix proposal completed",
+      ];
+    case "preserved":
+      return [`[AI] ${outcome.result.error.code}`];
+    case "cancelled":
+      return ["[AI] AI_FIX_CANCELLED"];
+    case "no-diagnosis":
+      return ["[AI] No diagnosis available"];
+    case "busy":
+      return ["[AI] Fix proposal already running"];
+  }
+}
+
+export function fixProposalUserNotice(outcome: FixProposalRunOutcome): UserNotice {
+  switch (outcome.status) {
+    case "replaced":
+      return { kind: "info", message: FIX_COMPLETE_MESSAGE };
+    case "preserved":
+      return { kind: "warn", message: userFacingFixError(outcome.result.error) };
+    case "cancelled":
+      return { kind: "warn", message: userFacingFixError({ code: "AI_FIX_CANCELLED", message: "" }) };
+    case "no-diagnosis":
+      return { kind: "warn", message: NO_DIAGNOSIS_FOR_FIX_MESSAGE };
+    case "busy":
+      return { kind: "warn", message: FIX_BUSY_MESSAGE };
   }
 }

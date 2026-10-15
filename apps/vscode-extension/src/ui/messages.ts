@@ -12,6 +12,12 @@ export const DIAGNOSIS_CLEARED_MESSAGE = "Diagnosis cleared.";
 
 export const DIAGNOSIS_COMPLETE_MESSAGE = "Read-only AI diagnosis complete.";
 
+export const NO_DIAGNOSIS_FOR_FIX_MESSAGE = "Run diagnosis before proposing a fix.";
+
+export const FIX_BUSY_MESSAGE = "A fix proposal is already running.";
+
+export const FIX_COMPLETE_MESSAGE = "In-memory proposed change ready. No workspace files were modified.";
+
 export const UNSAFE_CANDIDATE_MESSAGE = "That file path is not a validated diagnosis candidate.";
 
 export function missingCandidateMessage(relativePath: string): string {

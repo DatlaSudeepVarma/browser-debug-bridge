@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
+import { createFakeDebugSessionV1 } from "@browser-debug-bridge/schema";
 import type { Diagnosis } from "../ai/types.js";
 import { FAKE_DIAGNOSIS } from "../ai/fake-provider.js";
 import { createFixtureAiProjectContext } from "../ai/test-support.js";
@@ -18,6 +19,7 @@ function viewState(diagnosis: Diagnosis = FAKE_DIAGNOSIS): DiagnosisViewState {
   return {
     diagnosis,
     project: createFixtureAiProjectContext(),
+    session: createFakeDebugSessionV1(),
     providerId: "fake",
     warnings: [],
   };
@@ -41,6 +43,7 @@ describe("diagnosis tree construction", () => {
       "suggested-next-step",
       "evidence",
       "limitations",
+      "proposed-fix",
     ]);
     assert.equal(roots[0]?.label, asPlainTreeText(FAKE_DIAGNOSIS.summary));
     const nodes = collectTreeNodes(state);
@@ -75,7 +78,7 @@ describe("diagnosis tree construction", () => {
       suggestedNextStep: "",
       limitations: [],
     });
-    assert.deepEqual(kinds(getRootNodes(state)), ["summary"]);
+    assert.deepEqual(kinds(getRootNodes(state)), ["summary", "proposed-fix"]);
   });
 
   it("omits empty candidate-file and evidence groups under a hypothesis", () => {
@@ -139,5 +142,16 @@ describe("diagnosis tree security", () => {
     assert.equal(summary?.label.includes("<script>alert(1)</script>"), true);
     const next = nodes.find((node) => node.kind === "suggested-next-step-text");
     assert.equal(next?.label, "curl http://evil.example");
+  });
+});
+
+describe("proposed fix tree", () => {
+  it("shows an ungenerated proposal status", () => {
+    const nodes = collectTreeNodes(viewState());
+    assert.equal(nodes.some((node) => node.kind === "proposed-fix"), true);
+    assert.equal(
+      nodes.some((node) => node.kind === "proposal-status" && node.label === "Status: Not generated"),
+      true,
+    );
   });
 });

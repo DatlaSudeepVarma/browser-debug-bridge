@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
+import { createFakeDebugSessionV1 } from "@browser-debug-bridge/schema";
 import { FAKE_DIAGNOSIS } from "../ai/fake-provider.js";
 import { createFixtureAiProjectContext } from "../ai/test-support.js";
 import { DiagnosisController } from "./diagnosis-state.js";
@@ -8,6 +9,7 @@ function sampleState() {
   return {
     diagnosis: FAKE_DIAGNOSIS,
     project: createFixtureAiProjectContext(),
+    session: createFakeDebugSessionV1(),
     providerId: "fake",
     warnings: [],
   };
@@ -45,6 +47,7 @@ describe("diagnosis controller state", () => {
         error: { code: "AI_UNAVAILABLE", message: "No language model is available." },
       },
       createFixtureAiProjectContext(),
+      createFakeDebugSessionV1(),
     );
     assert.equal(preserved, "preserved");
     assert.equal(controller.getDiagnosis()?.diagnosis.summary, FAKE_DIAGNOSIS.summary);
@@ -59,6 +62,7 @@ describe("diagnosis controller state", () => {
         candidateCount: 1,
       },
       createFixtureAiProjectContext(),
+      createFakeDebugSessionV1(),
     );
     assert.equal(replaced, "replaced");
     assert.equal(controller.getDiagnosis()?.diagnosis.summary, "Updated summary");

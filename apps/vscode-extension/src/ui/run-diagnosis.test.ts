@@ -41,6 +41,7 @@ describe("diagnosis run transaction", () => {
     controller.setDiagnosis({
       diagnosis: { ...FAKE_DIAGNOSIS, summary: "old" },
       project: createFixtureAiProjectContext(),
+      session: createFakeDebugSessionV1(),
       providerId: "old",
       warnings: [],
     });
@@ -60,6 +61,7 @@ describe("diagnosis run transaction", () => {
     controller.setDiagnosis({
       diagnosis: { ...FAKE_DIAGNOSIS, summary: "old" },
       project: createFixtureAiProjectContext(),
+      session: createFakeDebugSessionV1(),
       providerId: "old",
       warnings: [],
     });
@@ -83,6 +85,7 @@ describe("diagnosis run transaction", () => {
     controller.setDiagnosis({
       diagnosis: { ...FAKE_DIAGNOSIS, summary: "old" },
       project: createFixtureAiProjectContext(),
+      session: createFakeDebugSessionV1(),
       providerId: "old",
       warnings: [],
     });
@@ -98,6 +101,7 @@ describe("diagnosis run transaction", () => {
     controller.setDiagnosis({
       diagnosis: { ...FAKE_DIAGNOSIS, summary: "old" },
       project: createFixtureAiProjectContext(),
+      session: createFakeDebugSessionV1(),
       providerId: "old",
       warnings: [],
     });

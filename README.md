@@ -14,14 +14,15 @@ No cloud backend is part of V1. The product stays on the developer's machine.
 
 ## Current development status
 
-This repository is in **early development (Phase 8)**.
+This repository is in **early development (Phase 9)**.
 
-Phase 1 scaffolded the monorepo. Phase 2 added the shared schema and redaction packages. Phase 3 added a local loopback HTTP bridge. Phase 4 added a session-scoped element picker and bounded DOM/CSS capture. Phase 5A added a cropped JPEG screenshot of the selected element's visible region, stored out of band from DebugSession JSON. Phase 5B added session-scoped console capture. Phase 5C added session-scoped network **failure metadata**. Phase 6 added a deterministic VS Code **project intelligence** foundation. Phase 7 added a **read-only AI diagnosis** behind a provider abstraction, using `vscode.lm` as the first provider. Phase 8 adds a native VS Code **TreeView** so a developer can inspect that diagnosis without changing files.
+Phase 1 scaffolded the monorepo. Phase 2 added the shared schema and redaction packages. Phase 3 added a local loopback HTTP bridge. Phase 4 added a session-scoped element picker and bounded DOM/CSS capture. Phase 5A added a cropped JPEG screenshot of the selected element's visible region, stored out of band from DebugSession JSON. Phase 5B added session-scoped console capture. Phase 5C added session-scoped network **failure metadata**. Phase 6 added a deterministic VS Code **project intelligence** foundation. Phase 7 added a **read-only AI diagnosis** behind a provider abstraction, using `vscode.lm` as the first provider. Phase 8 added a native VS Code **TreeView** so a developer can inspect that diagnosis without changing files. Phase 9 adds an in-memory **proposed code change** and **validated unified diff**.
 
 The following are **not implemented yet**:
 
 - WebSocket events
-- Code patching / diffs / file modification
+- Applying patches / writing workspace files
+- Native VS Code diff UI
 - Screenshot bytes sent to a multimodal model
 
 ## Architecture overview
@@ -31,7 +32,7 @@ The repository is a pnpm + TypeScript monorepo:
 | Area | Role |
 | --- | --- |
 | Chrome extension | Manifest V3 extension: pair, pick an element, capture a cropped JPEG, session-scoped console, and network failure metadata, submit a sanitized DebugSession |
-| VS Code extension | Owns the local loopback HTTP bridge, project intelligence, read-only AI diagnosis, and diagnosis TreeView |
+| VS Code extension | Owns the local loopback HTTP bridge, project intelligence, read-only AI diagnosis, diagnosis TreeView, and in-memory fix proposals |
 | `@browser-debug-bridge/schema` | DebugSession V1 and protocol message Zod schemas |
 | `@browser-debug-bridge/redaction` | URL, DOM, text, and workspace-path sanitization |
 | Local bridge | HTTP on `127.0.0.1:17321` inside the VS Code extension process |
@@ -71,7 +72,7 @@ pnpm test
 
 Full commands are in [docs/development.md](docs/development.md).
 
-## Current Phase 8 scope
+## Current Phase 9 scope
 
 - Session-scoped element picker on the current tab (`activeTab` + `scripting`)
 - Bounded selected-element, DOM, and computed-CSS capture
@@ -88,18 +89,20 @@ Full commands are in [docs/development.md](docs/development.md).
 - Prompt-injection framing, evidence IDs, candidate-file validation, and a second AI size budget
 - Native VS Code TreeView (`browserDebugBridge.diagnosis`) that presents the validated `Diagnosis`
 - In-memory diagnosis state with refresh/clear commands and workspace-jailed candidate navigation
+- Diagnosis-aware fix proposals through the existing `AiProvider` (`vscode.lm`)
+- Candidate-allowlisted, size-bounded JSON edits converted into a validated unified diff in memory
 
 This is **not** a full-repository scan, not a file-modifying agent, and **not** a guarantee of the correct root cause.
 
-**Phase 8 provides a read-only diagnosis UI. It does not generate or apply code changes.**
+**Phase 9 generates a proposed code change and validated unified diff entirely in memory. It does not modify workspace files.**
 
-WebSocket events, diffs, and patch application are not part of this phase.
+WebSocket events, native diff UI, Apply/Reject, and patch application are not part of this phase.
 
 ## Future roadmap
 
 Later phases are expected to add, in order:
 
-1. Proposed fixes with developer approval before apply
+1. Native VS Code diff review with explicit developer Apply/Reject
 2. Optional screenshot-to-model vision
 
 Do not assume any of those capabilities exist in the current tree.

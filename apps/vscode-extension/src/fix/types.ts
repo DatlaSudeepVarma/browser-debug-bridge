@@ -1,6 +1,7 @@
 import type { Diagnosis } from "../ai/types.js";
 import type { DebugSessionV1 } from "@browser-debug-bridge/schema";
 import type { ProjectContext } from "../project/types.js";
+import type { FixPathRejection } from "./paths.js";
 
 export type FixErrorCode =
   | "AI_FIX_UNAVAILABLE"
@@ -57,6 +58,45 @@ export interface StoredProposal {
   createdAt: string;
   providerId: string;
 }
+
+export type ApplyPlanErrorCode =
+  | "APPLY_NO_PROPOSAL"
+  | "APPLY_IDENTITY_MISMATCH"
+  | "APPLY_DIAGNOSIS_MISMATCH"
+  | "APPLY_PATH_REJECTED"
+  | "APPLY_CANONICAL_REJECTED"
+  | "APPLY_FILE_MISSING"
+  | "APPLY_SOURCE_STALE"
+  | "APPLY_SOURCE_CHANGED"
+  | "APPLY_EDIT_INVALID"
+  | "APPLY_PROPOSAL_MALFORMED"
+  | "APPLY_TEXT_AMBIGUOUS";
+
+export interface ApplyPlanRefusal {
+  code: ApplyPlanErrorCode;
+  message: string;
+  relativePath?: string;
+  pathReason?: FixPathRejection;
+}
+
+export interface SafeApplyFilePlan {
+  relativePath: string;
+  workspaceRoot: string;
+  currentContent: string;
+  currentContentHash: string;
+  proposedContent: string;
+  proposedContentHash: string;
+  edits: ProposedEdit[];
+}
+
+export interface SafeApplyPlan {
+  identity: ProposalIdentity;
+  files: SafeApplyFilePlan[];
+}
+
+export type ApplyPlanResult =
+  | { status: "ok"; plan: SafeApplyPlan }
+  | { status: "refused"; reason: ApplyPlanRefusal };
 
 export interface SerializedFixContext {
   text: string;

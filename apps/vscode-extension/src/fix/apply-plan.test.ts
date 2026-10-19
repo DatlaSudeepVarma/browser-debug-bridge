@@ -12,7 +12,9 @@ import { planSafeApply } from "./apply-plan.js";
 import type { CanonicalPathIo } from "./canonical-path.js";
 import { FAKE_CHECKOUT_SOURCE, FAKE_FIX_PROPOSAL, jsonProposal } from "./fake-proposal.js";
 import { diagnosisFingerprint, sha256Utf8 } from "./hash.js";
+import { createMemoryLiveFileReader } from "./live-file.js";
 import { FixProposalService } from "./proposal.js";
+import { fixtureCanonicalIo } from "./test-support.js";
 import type { ProposedFileChange, StoredProposal } from "./types.js";
 
 const CHECKOUT = "src/services/checkout.ts";
@@ -34,45 +36,20 @@ async function validProposal(): Promise<StoredProposal> {
   return result.proposal;
 }
 
-function fixtureCanonicalIo(options?: {
-  realpathOverrides?: Record<string, string>;
-  missingRoot?: boolean;
-}): CanonicalPathIo {
-  const root = "/workspace/shop";
-  const paths = [
-    root,
-    `${root}/src`,
-    `${root}/src/services`,
-    `${root}/src/services/checkout.ts`,
-    `${root}/src/components`,
-    `${root}/src/components/BuyNowButton.tsx`,
-    `${root}/src/app`,
-    `${root}/src/app/checkout`,
-    `${root}/src/app/checkout/page.tsx`,
-  ];
-  const exists = new Set(options?.missingRoot === true ? [] : paths);
-  const realpath: Record<string, string> = {};
-  for (const item of paths) {
-    realpath[item] = item;
+async function validProposalWithBaseline(live: string): Promise<StoredProposal> {
+  const result = await new FixProposalService(new FakeAiProvider(jsonProposal(FAKE_FIX_PROPOSAL)), {
+    liveFileReader: createMemoryLiveFileReader({ [CHECKOUT]: live }),
+    canonicalIo: fixtureCanonicalIo(),
+  }).propose(
+    createProjectIntelligenceSession(),
+    createFixtureAiProjectContext(),
+    FAKE_DIAGNOSIS,
+  );
+  assert.equal(result.status, "ok");
+  if (result.status !== "ok") {
+    throw new Error("expected a valid proposal with a live-file baseline");
   }
-  Object.assign(realpath, options?.realpathOverrides ?? {});
-  return {
-    exists(target: string): boolean {
-      return exists.has(target);
-    },
-    realpath(target: string): string {
-      const resolved = realpath[target];
-      if (resolved === undefined) {
-        throw new Error(`missing realpath for ${target}`);
-      }
-      return resolved;
-    },
-    join(left: string, right: string): string {
-      return left.endsWith("/") ? `${left}${right}` : `${left}/${right}`;
-    },
-    sep: "/",
-    ignoreCase: false,
-  };
+  return result.proposal;
 }
 
 function plan(
@@ -379,6 +356,30 @@ describe("write-free apply planner", () => {
     if (nul.status === "refused") {
       assert.equal(nul.reason.code, "APPLY_TEXT_AMBIGUOUS");
     }
+  });
+
+  it("rejects an unchanged excerpt when the stored full-file hash no longer matches", async () => {
+    const original = `${FAKE_CHECKOUT_SOURCE}${EXTENDED_TAIL}`;
+    const proposal = await validProposalWithBaseline(original);
+    const changedOutside = original.replace("return 1;", "return 2;");
+    const result = plan(proposal, { [CHECKOUT]: changedOutside });
+    assert.equal(result.status, "refused");
+    if (result.status !== "refused") {
+      return;
+    }
+    assert.equal(result.reason.code, "APPLY_SOURCE_CHANGED");
+    assert.equal(proposal.liveFileHashes?.[CHECKOUT], sha256Utf8(original));
+  });
+
+  it("accepts a stable file that still matches the stored full-file baseline", async () => {
+    const proposal = await validProposalWithBaseline(FAKE_CHECKOUT_SOURCE);
+    const result = plan(proposal, { [CHECKOUT]: FAKE_CHECKOUT_SOURCE });
+    assert.equal(result.status, "ok");
+    if (result.status !== "ok") {
+      return;
+    }
+    assert.equal(proposal.liveFileHashes?.[CHECKOUT], sha256Utf8(FAKE_CHECKOUT_SOURCE));
+    assert.equal(result.plan.files[0]?.currentContentHash, sha256Utf8(FAKE_CHECKOUT_SOURCE));
   });
 
   it("does not invoke filesystem writes or VS Code mutation APIs", async () => {

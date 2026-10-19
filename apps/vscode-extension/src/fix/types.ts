@@ -12,6 +12,8 @@ export type FixErrorCode =
   | "AI_FIX_CONTEXT_INSUFFICIENT"
   | "AI_FIX_PROPOSAL_TOO_LARGE"
   | "AI_DIFF_INVALID"
+  | "AI_FIX_SOURCE_UNAVAILABLE"
+  | "AI_FIX_SOURCE_CHANGED"
   | "AI_FIX_CANCELLED";
 
 export interface FixError {
@@ -57,6 +59,12 @@ export interface StoredProposal {
   identity: ProposalIdentity;
   createdAt: string;
   providerId: string;
+  /**
+   * Host-computed SHA-256 of each proposed file's complete UTF-8 text at
+   * proposal time. Distinct from ProposedFileChange.originalContentHash,
+   * which remains an excerpt digest. Absent on legacy in-memory proposals.
+   */
+  liveFileHashes?: Readonly<Record<string, string>>;
 }
 
 export type ApplyPlanErrorCode =

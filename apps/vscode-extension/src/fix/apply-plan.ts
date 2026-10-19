@@ -3,13 +3,18 @@ import { splitLines } from "../project/excerpts.js";
 import type { ProjectContext } from "../project/types.js";
 import { inspectCanonicalWorkspaceTarget, type CanonicalPathIo } from "./canonical-path.js";
 import { diagnosisFingerprint, sha256Utf8 } from "./hash.js";
+import {
+  contentLines,
+  hasStoredLiveFileHashes,
+  inspectLiveText,
+  liveExcerptsMatch,
+} from "./live-file.js";
 import { validateFixPath, type FixPathRejection } from "./paths.js";
 import {
   buildBoundedSources,
   diagnosisCandidatePaths,
   findExcerptForRange,
   sourceFingerprint,
-  type BoundedFileSource,
 } from "./source.js";
 import type {
   ApplyPlanErrorCode,
@@ -22,10 +27,10 @@ import type {
 import { validateProposedChange } from "./validation.js";
 
 /**
- * StoredProposal.originalContentHash is an excerpt digest from hashFileSource,
- * not a SHA-256 of the complete file. Optional trustedFullFileHashes is the
- * host-computed full-file baseline (not yet stored on StoredProposal).
- * Without that baseline, outside-excerpt drift cannot be proven.
+ * StoredProposal.originalContentHash is an excerpt digest from hashFileSource.
+ * Production proposals also carry liveFileHashes (complete-file SHA-256).
+ * trustedFullFileHashes is only for legacy in-memory proposals that predate
+ * that field; it never overrides a stored baseline.
  */
 export interface PlanSafeApplyInput {
   proposal: StoredProposal | undefined;
@@ -216,7 +221,7 @@ function planSafeApplyUnchecked(input: PlanSafeApplyInput): ApplyPlanResult {
     }
 
     const liveLines = contentLines(currentContent);
-    const excerptCheck = liveExcerptsStillMatch(source, liveLines);
+    const excerptCheck = liveExcerptsMatch(source, splitLines(currentContent));
     if (excerptCheck !== "ok") {
       return refuse(
         excerptCheck,
@@ -228,8 +233,21 @@ function planSafeApplyUnchecked(input: PlanSafeApplyInput): ApplyPlanResult {
     }
 
     const currentContentHash = sha256Utf8(currentContent);
-    const trustedFullFileHash = input.trustedFullFileHashes?.[lexical.relativePath];
-    if (trustedFullFileHash !== undefined && trustedFullFileHash !== currentContentHash) {
+    const storedHashes = hasStoredLiveFileHashes(proposal.liveFileHashes)
+      ? proposal.liveFileHashes
+      : undefined;
+    const expectedFullFileHash =
+      storedHashes !== undefined
+        ? storedHashes[lexical.relativePath]
+        : input.trustedFullFileHashes?.[lexical.relativePath];
+    if (storedHashes !== undefined && expectedFullFileHash === undefined) {
+      return refuse(
+        "APPLY_SOURCE_CHANGED",
+        "The proposal is missing a trusted full-file baseline for this path.",
+        { relativePath: lexical.relativePath },
+      );
+    }
+    if (expectedFullFileHash !== undefined && expectedFullFileHash !== currentContentHash) {
       return refuse(
         "APPLY_SOURCE_CHANGED",
         "The complete file changed outside the trusted excerpt baseline.",
@@ -352,60 +370,6 @@ function readStoredEdit(
       replacement: value.replacement,
     },
   };
-}
-
-function inspectLiveText(
-  content: string,
-): { status: "ok"; newline: "\n" | "\r\n"; trailingNewline: boolean } | { status: "ambiguous" } {
-  if (content.includes("\u0000")) {
-    return { status: "ambiguous" };
-  }
-  const hasCrlf = content.includes("\r\n");
-  const withoutCrlf = content.replace(/\r\n/g, "");
-  if (withoutCrlf.includes("\r")) {
-    return { status: "ambiguous" };
-  }
-  if (hasCrlf && withoutCrlf.includes("\n")) {
-    return { status: "ambiguous" };
-  }
-  const newline = hasCrlf ? "\r\n" : "\n";
-  const trailingNewline = hasCrlf ? content.endsWith("\r\n") : content.endsWith("\n");
-  return { status: "ok", newline, trailingNewline };
-}
-
-function contentLines(content: string): string[] {
-  const lines = splitLines(content);
-  if ((content.endsWith("\n") || content.endsWith("\r\n")) && lines[lines.length - 1] === "") {
-    return lines.slice(0, -1);
-  }
-  return lines;
-}
-
-function liveExcerptsStillMatch(
-  source: BoundedFileSource,
-  liveLines: readonly string[],
-): "ok" | "APPLY_SOURCE_STALE" | "APPLY_EDIT_INVALID" {
-  if (source.excerpts.length === 0) {
-    return "APPLY_SOURCE_STALE";
-  }
-  for (const excerpt of source.excerpts) {
-    if (excerpt.startLine < 1 || excerpt.endLine < excerpt.startLine) {
-      return "APPLY_EDIT_INVALID";
-    }
-    if (excerpt.endLine > liveLines.length) {
-      return "APPLY_SOURCE_STALE";
-    }
-    const actual = liveLines.slice(excerpt.startLine - 1, excerpt.endLine);
-    if (actual.length !== excerpt.lines.length) {
-      return "APPLY_SOURCE_STALE";
-    }
-    for (let index = 0; index < excerpt.lines.length; index += 1) {
-      if (actual[index] !== excerpt.lines[index]) {
-        return "APPLY_SOURCE_STALE";
-      }
-    }
-  }
-  return "ok";
 }
 
 function applyEditsToLines(lines: readonly string[], edits: readonly ProposedEdit[]): string[] | undefined {

@@ -16,9 +16,12 @@ import type { Diagnosis } from "../ai/types.js";
 import { BridgeServer } from "../bridge/server.js";
 import { generatePairingToken } from "../bridge/crypto.js";
 import { FAKE_FIX_PROPOSAL, jsonProposal } from "../fix/fake-proposal.js";
+import { sha256Utf8 } from "../fix/hash.js";
+import { createMemoryLiveFileReader } from "../fix/live-file.js";
 import { FixProposalService } from "../fix/proposal.js";
 import { FixProposalController } from "../fix/proposal-state.js";
 import { runFixProposal } from "../fix/run-proposal.js";
+import { memoryWorkspaceCanonicalIo } from "../fix/test-support.js";
 import { MemoryWorkspaceAccess } from "../project/memory-access.js";
 import { ProjectIntelligenceService } from "../project/service.js";
 import {
@@ -60,6 +63,14 @@ function submissionFromSession() {
 
 async function parseError(response: Response): Promise<ProtocolError> {
   return (await response.json()) as ProtocolError;
+}
+
+function fixtureLiveProposalService(provider: FakeAiProvider): FixProposalService {
+  const files = createFixtureFileMap();
+  return new FixProposalService(provider, {
+    liveFileReader: createMemoryLiveFileReader(files),
+    canonicalIo: memoryWorkspaceCanonicalIo(FIXTURE_FOLDER_ROOT, Object.keys(files)),
+  });
 }
 
 function fixtureWorkspace(): MemoryWorkspaceAccess {
@@ -197,7 +208,7 @@ describe("phase 11 fake end-to-end workflow", () => {
       diagnosisController.getDiagnosis(),
       proposalController,
       (state, token) =>
-        new FixProposalService(new FakeAiProvider(jsonProposal(proposalForCandidate(candidate)))).propose(
+        fixtureLiveProposalService(new FakeAiProvider(jsonProposal(proposalForCandidate(candidate)))).propose(
           state.session,
           state.project,
           state.diagnosis,
@@ -216,6 +227,9 @@ describe("phase 11 fake end-to-end workflow", () => {
       proposalController.getProposal()?.diff.text.includes(`--- a/${candidate.relativePath}`),
       true,
     );
+    const liveContent = createFixtureFileMap()[candidate.relativePath];
+    assert.equal(typeof liveContent, "string");
+    assert.equal(proposalController.getProposal()?.liveFileHashes?.[candidate.relativePath], sha256Utf8(liveContent ?? ""));
     assert.equal(sha256File(FIXTURE_CHECKOUT_ON_DISK), before);
   });
 
@@ -242,7 +256,7 @@ describe("phase 11 fake end-to-end workflow", () => {
       diagnosisController.getDiagnosis(),
       proposalController,
       (state) =>
-        new FixProposalService(new FakeAiProvider(jsonProposal(proposalForCandidate(candidate)))).propose(
+        fixtureLiveProposalService(new FakeAiProvider(jsonProposal(proposalForCandidate(candidate)))).propose(
           state.session,
           state.project,
           state.diagnosis,
@@ -310,7 +324,7 @@ describe("phase 11 security and recovery", () => {
       diagnosisController.getDiagnosis(),
       proposalController,
       (state) =>
-        new FixProposalService(new FakeAiProvider(jsonProposal(proposalForCandidate(candidate)))).propose(
+        fixtureLiveProposalService(new FakeAiProvider(jsonProposal(proposalForCandidate(candidate)))).propose(
           state.session,
           state.project,
           state.diagnosis,

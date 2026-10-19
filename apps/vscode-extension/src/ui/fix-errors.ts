@@ -10,6 +10,10 @@ const MESSAGES: Record<FixErrorCode, string> = {
     "The diagnosis does not include enough bounded source excerpts to propose a change.",
   AI_FIX_PROPOSAL_TOO_LARGE: "The proposed change exceeded size limits and was rejected.",
   AI_DIFF_INVALID: "The proposed edits could not be turned into a valid unified diff.",
+  AI_FIX_SOURCE_UNAVAILABLE:
+    "A proposed file could not be read or failed workspace path checks. The previous proposal was kept if one existed.",
+  AI_FIX_SOURCE_CHANGED:
+    "A proposed file changed while the fix was being generated. The previous proposal was kept if one existed.",
   AI_FIX_CANCELLED: "Fix proposal was cancelled. The previous proposal was kept if one existed.",
 };
 

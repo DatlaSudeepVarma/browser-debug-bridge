@@ -12,7 +12,11 @@ import { DiagnosisService } from "./ai/diagnosis.js";
 import { VscodeLmProvider } from "./ai/vscode-lm-provider.js";
 import { ProjectIntelligenceService } from "./project/service.js";
 import { formatProjectIntelligenceSummary } from "./project/summary.js";
+import type { ProjectContext } from "./project/types.js";
 import { createVscodeWorkspaceAccess, wrapVscodeCancellation } from "./project/vscode-access.js";
+import { normalizeFsPath } from "./project/workspace.js";
+import { nodeCanonicalIo } from "./fix/canonical-path.js";
+import type { LiveFileReader } from "./fix/live-file.js";
 import { FixProposalService } from "./fix/proposal.js";
 import { FixProposalController } from "./fix/proposal-state.js";
 import { runFixProposal } from "./fix/run-proposal.js";
@@ -295,7 +299,10 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
             controller.getDiagnosis(),
             proposalController,
             (state, proposeToken) =>
-              new FixProposalService(new VscodeLmProvider()).propose(
+              new FixProposalService(new VscodeLmProvider(), {
+                liveFileReader: createWorkspaceLiveFileReader(state.project),
+                canonicalIo: nodeCanonicalIo,
+              }).propose(
                 state.session,
                 state.project,
                 state.diagnosis,
@@ -327,6 +334,28 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       }
     }),
   );
+}
+
+function createWorkspaceLiveFileReader(project: ProjectContext): LiveFileReader {
+  return {
+    async readText(relativePath: string): Promise<string | undefined> {
+      const candidate = project.candidates.find((item) => item.relativePath === relativePath);
+      const workspaceRoot = candidate?.workspaceRoot ?? project.workspaceRoot;
+      const folder = vscode.workspace.workspaceFolders?.find(
+        (item) => normalizeFsPath(item.uri.fsPath) === normalizeFsPath(workspaceRoot),
+      );
+      if (folder === undefined) {
+        return undefined;
+      }
+      try {
+        const uri = vscode.Uri.joinPath(folder.uri, ...relativePath.split("/"));
+        const bytes = await vscode.workspace.fs.readFile(uri);
+        return Buffer.from(bytes).toString("utf8");
+      } catch {
+        return undefined;
+      }
+    },
+  };
 }
 
 export async function deactivate(): Promise<void> {

@@ -2,21 +2,33 @@ import type { DebugSessionV1 } from "@browser-debug-bridge/schema";
 import { AnalysisCancelledError, throwIfCancelled } from "../project/cancellation.js";
 import type { CancellationTokenLike, ProjectContext } from "../project/types.js";
 import type { AiProvider, Diagnosis } from "../ai/types.js";
+import { nodeCanonicalIo, type CanonicalPathIo } from "./canonical-path.js";
 import { MAX_FIX_OUTPUT_CHARS } from "./constants.js";
 import { generateUnifiedDiff } from "./diff.js";
 import { validateUnifiedDiff } from "./diff-validation.js";
 import { fixError, mapProviderError } from "./errors.js";
 import { diagnosisFingerprint } from "./hash.js";
+import {
+  captureSourceBaselines,
+  verifyProposedBaselines,
+  type LiveFileReader,
+} from "./live-file.js";
 import { buildFixUserPrompt, FIX_SYSTEM_PROMPT } from "./prompts.js";
 import { serializeFixContext, type FixSerializeLimits } from "./serializer.js";
 import { buildBoundedSources } from "./source.js";
 import type { FixProposalResult } from "./types.js";
 import { parseFixProposalJson, validateProposedChange } from "./validation.js";
 
+export interface FixProposalServiceOptions {
+  serializeLimits?: Partial<FixSerializeLimits>;
+  liveFileReader?: LiveFileReader;
+  canonicalIo?: CanonicalPathIo;
+}
+
 export class FixProposalService {
   public constructor(
     private readonly provider: AiProvider,
-    private readonly options: { serializeLimits?: Partial<FixSerializeLimits> } = {},
+    private readonly options: FixProposalServiceOptions = {},
   ) {}
 
   public async propose(
@@ -93,6 +105,19 @@ export class FixProposalService {
       serialized.context.allowedPaths,
       this.options.serializeLimits,
     );
+    const liveFileReader = this.options.liveFileReader;
+    const canonicalIo = this.options.canonicalIo ?? nodeCanonicalIo;
+    const capturedBaselines =
+      liveFileReader === undefined
+        ? undefined
+        : await captureSourceBaselines({
+            sources,
+            project,
+            allowedPaths: serialized.context.allowedPaths,
+            reader: liveFileReader,
+            canonicalIo,
+          });
+    throwIfCancelled(token);
     const completion = await this.provider.complete(
       {
         system: FIX_SYSTEM_PROMPT,
@@ -177,6 +202,41 @@ export class FixProposalService {
       };
     }
 
+    let liveFileHashes: Readonly<Record<string, string>> | undefined;
+    if (liveFileReader !== undefined) {
+      throwIfCancelled(token);
+      const verified = await verifyProposedBaselines({
+        changes: validated.proposedChange.changes,
+        sources,
+        project,
+        allowedPaths: serialized.context.allowedPaths,
+        captured: capturedBaselines ?? new Map(),
+        reader: liveFileReader,
+        canonicalIo,
+      });
+      if (verified.status === "changed") {
+        return {
+          status: "error",
+          providerId: this.provider.id,
+          error: fixError(
+            "AI_FIX_SOURCE_CHANGED",
+            "A proposed file changed while the fix proposal was being generated.",
+          ),
+        };
+      }
+      if (verified.status !== "ok") {
+        return {
+          status: "error",
+          providerId: this.provider.id,
+          error: fixError(
+            "AI_FIX_SOURCE_UNAVAILABLE",
+            "A proposed file could not be read as a trusted full-file baseline.",
+          ),
+        };
+      }
+      liveFileHashes = verified.liveFileHashes;
+    }
+
     return {
       status: "ok",
       providerId: this.provider.id,
@@ -192,6 +252,7 @@ export class FixProposalService {
         },
         createdAt: new Date().toISOString(),
         providerId: this.provider.id,
+        liveFileHashes,
       },
     };
   }

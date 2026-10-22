@@ -6,11 +6,13 @@ import { FAKE_DIAGNOSIS } from "../ai/fake-provider.js";
 import { createFixtureAiProjectContext } from "../ai/test-support.js";
 import { FIXTURE_CHECKOUT_SERVICE } from "../project/test-fixtures/files.js";
 import type { DiagnosisViewState } from "./diagnosis-state.js";
+import { OPEN_CANDIDATE_COMMAND, REVIEW_FIX_COMMAND } from "./constants.js";
 import {
   collectTreeNodes,
   getChildNodes,
   getRootNodes,
   openableRelativePath,
+  treeItemCommand,
   type DiagnosisTreeNode,
 } from "./diagnosis-tree.js";
 import { asPlainTreeText } from "./plain-text.js";
@@ -153,5 +155,35 @@ describe("proposed fix tree", () => {
       nodes.some((node) => node.kind === "proposal-status" && node.label === "Status: Not generated"),
       true,
     );
+  });
+
+  it("wires the proposal-diff node to the review command without stale path arguments", () => {
+    const nodes = collectTreeNodes(viewState(), {
+      generating: false,
+      lastOutcome: "none",
+      proposal: {
+        proposedChange: {
+          summary: "summary",
+          rationale: "rationale",
+          changes: [{ relativePath: "src/services/checkout.ts", originalContentHash: "a".repeat(64), edits: [] }],
+        },
+        diff: { text: "diff", fileCount: 1, editCount: 1, lineCount: 1, paths: ["src/services/checkout.ts"] },
+        identity: { sessionId: "id", diagnosisFingerprint: "a".repeat(64), sourceFingerprint: "b".repeat(64) },
+        createdAt: "2026-01-01T00:00:00.000Z",
+        providerId: "fake",
+      },
+    });
+    const diff = nodes.find((node) => node.kind === "proposal-diff");
+    assert.equal(diff?.kind, "proposal-diff");
+    assert.equal(openableRelativePath(diff as DiagnosisTreeNode), undefined);
+    const command = treeItemCommand(diff as DiagnosisTreeNode);
+    assert.equal(command?.command, REVIEW_FIX_COMMAND);
+    assert.deepEqual(command?.arguments, []);
+
+    const proposalFile = nodes.find((node) => node.kind === "proposal-file");
+    assert.equal(proposalFile?.kind, "proposal-file");
+    const fileCommand = treeItemCommand(proposalFile as DiagnosisTreeNode);
+    assert.equal(fileCommand?.command, OPEN_CANDIDATE_COMMAND);
+    assert.deepEqual(fileCommand?.arguments, ["src/services/checkout.ts"]);
   });
 });

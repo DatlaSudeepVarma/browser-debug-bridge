@@ -91,6 +91,27 @@ describe("fix proposal state", () => {
     assert.equal(controller.getProposal(), undefined);
   });
 
+  it("rejects only the proposal the caller observed", async () => {
+    const controller = new FixProposalController();
+    assert.equal(controller.reject(undefined), "no-proposal");
+
+    const first = await successfulProposal();
+    controller.applySuccess(first);
+    const second = await successfulProposal();
+    controller.applySuccess(second);
+    assert.equal(controller.reject(first), "stale");
+    assert.equal(controller.getProposal(), second);
+    assert.equal(controller.getTreeState().lastOutcome, "none");
+
+    assert.equal(controller.reject(second), "rejected");
+    assert.equal(controller.getProposal(), undefined);
+    assert.equal(controller.getTreeState().lastOutcome, "rejected");
+    assert.equal(controller.reject(second), "no-proposal");
+
+    controller.applySuccess(await successfulProposal());
+    assert.equal(controller.getTreeState().lastOutcome, "none");
+  });
+
   it("does not store a proposal after the diagnosis is cleared during generation", async () => {
     const diagnosis = new DiagnosisController();
     const proposal = new FixProposalController();

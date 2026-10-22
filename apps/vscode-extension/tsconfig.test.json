@@ -16,6 +16,8 @@
     "src/ai/vscode-lm-provider.ts",
     "src/ui/diagnosis-tree-item.ts",
     "src/ui/diagnosis-tree-provider.ts",
-    "src/ui/vscode-open.ts"
+    "src/ui/vscode-open.ts",
+    "src/ui/review-diff.ts",
+    "src/ui/apply-edit.ts"
   ]
 }

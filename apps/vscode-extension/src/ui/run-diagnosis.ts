@@ -34,6 +34,9 @@ export async function runDiagnosis(
   options: { allowCreateSession: boolean; proposalController?: FixProposalController },
   token?: CancellationTokenLike,
 ): Promise<DiagnosisRunOutcome> {
+  if (options.proposalController?.isApplying() === true) {
+    return { status: "busy" };
+  }
   if (!controller.beginRun()) {
     return { status: "busy" };
   }
@@ -64,6 +67,9 @@ export async function runDiagnosis(
       return { status: "discarded" };
     }
     if (result.status === "ok") {
+      if (options.proposalController?.isApplying() === true) {
+        return { status: "discarded" };
+      }
       options.proposalController?.clear();
       controller.applyResult(result, analysis.context, session);
       return { status: "replaced", result };

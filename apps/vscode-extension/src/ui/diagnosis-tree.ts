@@ -8,8 +8,15 @@ import {
   isProjectEvidence,
   parseEvidenceRef,
 } from "./evidence-refs.js";
+import { OPEN_CANDIDATE_COMMAND, REVIEW_FIX_COMMAND } from "./constants.js";
 import type { DiagnosisViewState } from "./diagnosis-state.js";
 import { asPlainTooltip, asPlainTreeText } from "./plain-text.js";
+
+export interface DiagnosisTreeCommand {
+  command: string;
+  title: string;
+  arguments: readonly string[];
+}
 
 export type DiagnosisTreeNode =
   | { kind: "summary"; id: string; label: string; tooltip: string }
@@ -196,6 +203,25 @@ export function openableRelativePath(node: DiagnosisTreeNode): string | undefine
     return node.relativePath;
   }
   return undefined;
+}
+
+export function treeItemCommand(node: DiagnosisTreeNode): DiagnosisTreeCommand | undefined {
+  if (node.kind === "proposal-diff") {
+    return {
+      command: REVIEW_FIX_COMMAND,
+      title: "Review Proposed Fix",
+      arguments: [],
+    };
+  }
+  const relativePath = openableRelativePath(node);
+  if (relativePath === undefined) {
+    return undefined;
+  }
+  return {
+    command: OPEN_CANDIDATE_COMMAND,
+    title: "Open Candidate File",
+    arguments: [relativePath],
+  };
 }
 
 export function nodeCanHaveChildren(node: DiagnosisTreeNode): boolean {
@@ -454,7 +480,7 @@ function proposedFixChildren(proposal?: ProposalTreeState): DiagnosisTreeNode[] 
       kind: "proposal-diff",
       id: "proposal-diff",
       label: "Ready for review",
-      tooltip: "Unified diff generated in memory. No workspace files were changed.",
+      tooltip: "Open a native diff of the current file against the proposed change. No workspace files will be written.",
     },
   );
   return nodes;
@@ -486,12 +512,24 @@ function proposalStatusLabel(proposal?: ProposalTreeState): string {
   if (proposal?.lastOutcome === "cancelled") {
     return "Status: Cancelled";
   }
+  if (proposal?.lastOutcome === "rejected") {
+    return "Status: Rejected";
+  }
+  if (proposal?.lastOutcome === "applied") {
+    return "Status: Applied";
+  }
   return "Status: Not generated";
 }
 
 function proposalStatusTooltip(proposal?: ProposalTreeState): string {
   if (proposal?.proposal !== undefined) {
     return "In-memory proposed change. It has not been applied.";
+  }
+  if (proposal?.lastOutcome === "rejected") {
+    return 'The proposed change was discarded without modifying any files. Run "Browser Debug Bridge: Propose Fix" to generate another suggestion.';
+  }
+  if (proposal?.lastOutcome === "applied") {
+    return "The proposed change was written to the workspace. Generate another proposal if you want a further suggestion.";
   }
   return 'Run "Browser Debug Bridge: Propose Fix" to generate a suggested change.';
 }

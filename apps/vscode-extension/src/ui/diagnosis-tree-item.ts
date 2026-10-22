@@ -1,6 +1,6 @@
 import * as vscode from "vscode";
-import { OPEN_CANDIDATE_COMMAND } from "./constants.js";
 import type { DiagnosisTreeNode } from "./diagnosis-tree.js";
+import { treeItemCommand } from "./diagnosis-tree.js";
 
 export function toDiagnosisTreeItem(node: DiagnosisTreeNode, hasChildren: boolean): vscode.TreeItem {
   const item = new vscode.TreeItem(
@@ -12,23 +12,13 @@ export function toDiagnosisTreeItem(node: DiagnosisTreeNode, hasChildren: boolea
   if ("tooltip" in node) {
     item.tooltip = node.tooltip;
   }
-  const relativePath = candidatePath(node);
-  if (relativePath !== undefined) {
+  const command = treeItemCommand(node);
+  if (command !== undefined) {
     item.command = {
-      command: OPEN_CANDIDATE_COMMAND,
-      title: "Open Candidate File",
-      arguments: [relativePath],
+      command: command.command,
+      title: command.title,
+      arguments: [...command.arguments],
     };
   }
   return item;
-}
-
-function candidatePath(node: DiagnosisTreeNode): string | undefined {
-  if (node.kind === "candidate" || node.kind === "candidate-group" || node.kind === "proposal-file") {
-    return node.relativePath;
-  }
-  if (node.kind === "excerpt") {
-    return node.relativePath;
-  }
-  return undefined;
 }

@@ -65,6 +65,22 @@
         "command": "browserDebugBridge.proposeFix",
         "title": "Propose Fix",
         "category": "Browser Debug Bridge"
+      },
+      {
+        "command": "browserDebugBridge.reviewFix",
+        "title": "Review Proposed Fix",
+        "category": "Browser Debug Bridge"
+      },
+      {
+        "command": "browserDebugBridge.rejectFix",
+        "title": "Reject Proposed Fix",
+        "category": "Browser Debug Bridge",
+        "icon": "$(discard)"
+      },
+      {
+        "command": "browserDebugBridge.applyFix",
+        "title": "Apply Proposed Fix",
+        "category": "Browser Debug Bridge"
       }
     ],
     "viewsContainers": {
@@ -106,6 +122,28 @@
           "command": "browserDebugBridge.proposeFix",
           "when": "view == browserDebugBridge.diagnosis",
           "group": "navigation"
+        },
+        {
+          "command": "browserDebugBridge.reviewFix",
+          "when": "view == browserDebugBridge.diagnosis && browserDebugBridge.hasFixProposal",
+          "group": "navigation"
+        },
+        {
+          "command": "browserDebugBridge.rejectFix",
+          "when": "view == browserDebugBridge.diagnosis && browserDebugBridge.hasFixProposal",
+          "group": "navigation"
+        },
+        {
+          "command": "browserDebugBridge.applyFix",
+          "when": "view == browserDebugBridge.diagnosis && browserDebugBridge.hasFixProposal",
+          "group": "navigation"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "browserDebugBridge.rejectFix",
+          "when": "view == browserDebugBridge.diagnosis && browserDebugBridge.hasFixProposal && (viewItem == proposal-diff || viewItem == proposal-status || viewItem == proposed-fix)",
+          "group": "inline"
         }
       ]
     },
@@ -124,7 +162,7 @@
     "build": "tsc -p tsconfig.json",
     "watch": "tsc -p tsconfig.json --watch",
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.test.json --noEmit",
-    "test": "tsx --test src/bridge/http-server.test.ts src/bridge/screenshot-store.test.ts src/bridge/replay-cache.test.ts src/project/framework.test.ts src/project/package-manager.test.ts src/project/signals.test.ts src/project/workspace.test.ts src/project/scoring.test.ts src/project/excerpts.test.ts src/project/service.test.ts src/ai/serializer.test.ts src/ai/validation.test.ts src/ai/diagnosis.test.ts src/ui/plain-text.test.ts src/ui/evidence-refs.test.ts src/ui/ai-errors.test.ts src/ui/diagnosis-state.test.ts src/ui/diagnosis-tree.test.ts src/ui/open-path.test.ts src/ui/open-candidate.test.ts src/ui/run-diagnosis.test.ts src/ui/notifications.test.ts src/ui/fix-errors.test.ts src/fix/apply-plan.test.ts src/fix/serializer.test.ts src/fix/paths.test.ts src/fix/canonical-path.test.ts src/fix/validation.test.ts src/fix/diff.test.ts src/fix/proposal.test.ts src/fix/proposal-state.test.ts src/integration/workflow.test.ts"
+    "test": "tsx --test src/bridge/http-server.test.ts src/bridge/screenshot-store.test.ts src/bridge/replay-cache.test.ts src/project/framework.test.ts src/project/package-manager.test.ts src/project/signals.test.ts src/project/workspace.test.ts src/project/scoring.test.ts src/project/excerpts.test.ts src/project/service.test.ts src/ai/serializer.test.ts src/ai/validation.test.ts src/ai/diagnosis.test.ts src/ui/plain-text.test.ts src/ui/evidence-refs.test.ts src/ui/ai-errors.test.ts src/ui/diagnosis-state.test.ts src/ui/diagnosis-tree.test.ts src/ui/open-path.test.ts src/ui/open-candidate.test.ts src/ui/run-diagnosis.test.ts src/ui/notifications.test.ts src/ui/fix-errors.test.ts src/ui/review-errors.test.ts src/fix/apply-plan.test.ts src/fix/serializer.test.ts src/fix/paths.test.ts src/fix/canonical-path.test.ts src/fix/validation.test.ts src/fix/diff.test.ts src/fix/proposal.test.ts src/fix/proposal-state.test.ts src/fix/review-fix.test.ts src/fix/reject-fix.test.ts src/fix/run-apply.test.ts src/integration/workflow.test.ts"
   },
   "dependencies": {
     "@browser-debug-bridge/redaction": "workspace:*",

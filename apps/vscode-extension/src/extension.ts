@@ -1,4 +1,6 @@
+import path from "node:path";
 import * as vscode from "vscode";
+import { inspectWorkspacePath } from "@browser-debug-bridge/redaction";
 import { createFakeDebugSessionV1, PAIRING_TOKEN_PATTERN } from "@browser-debug-bridge/schema";
 import {
   BRIDGE_HOST,
@@ -17,27 +19,44 @@ import { createVscodeWorkspaceAccess, wrapVscodeCancellation } from "./project/v
 import { normalizeFsPath } from "./project/workspace.js";
 import { nodeCanonicalIo } from "./fix/canonical-path.js";
 import type { LiveFileReader } from "./fix/live-file.js";
+import { ProposedPreviewStore, proposalPreviewOwner } from "./fix/preview-store.js";
 import { FixProposalService } from "./fix/proposal.js";
 import { FixProposalController } from "./fix/proposal-state.js";
+import { rejectFixProposal } from "./fix/reject-fix.js";
+import { runApplyFix } from "./fix/run-apply.js";
+import { prepareFixReview, snapshotLiveFiles } from "./fix/review-fix.js";
+import { publishAndOpenReview } from "./fix/review-open.js";
 import { runFixProposal } from "./fix/run-proposal.js";
+import type { StoredProposal } from "./fix/types.js";
 import {
+  APPLY_FIX_COMMAND,
   CLEAR_DIAGNOSIS_COMMAND,
   DIAGNOSE_TEST_SESSION_COMMAND,
   DIAGNOSIS_VIEW_ID,
+  HAS_FIX_PROPOSAL_CONTEXT,
   OPEN_CANDIDATE_COMMAND,
   PROPOSE_FIX_COMMAND,
   REFRESH_DIAGNOSIS_COMMAND,
+  REJECT_FIX_COMMAND,
+  REVIEW_FIX_COMMAND,
 } from "./ui/constants.js";
 import { DiagnosisController } from "./ui/diagnosis-state.js";
 import { DiagnosisTreeProvider } from "./ui/diagnosis-tree-provider.js";
-import { DIAGNOSIS_CLEARED_MESSAGE } from "./ui/messages.js";
+import { createVscodeApplyWriter } from "./ui/apply-edit.js";
+import { DIAGNOSIS_CLEARED_MESSAGE, REVIEW_DIFF_FAILED_MESSAGE, REVIEW_OPENED_MESSAGE, applyConfirmMessage } from "./ui/messages.js";
 import {
+  applyFixLogLines,
+  applyFixUserNotice,
   diagnosisLogLines,
   diagnosisUserNotice,
   fixProposalLogLines,
   fixProposalUserNotice,
+  rejectFixLogLines,
+  rejectFixUserNotice,
 } from "./ui/notifications.js";
 import { openCandidateFile } from "./ui/open-candidate.js";
+import { logSafeReviewError, userFacingReviewError } from "./ui/review-errors.js";
+import { createVscodeReviewOpener, registerProposedPreviewProvider } from "./ui/review-diff.js";
 import { runDiagnosis, type DiagnosisRunOutcome } from "./ui/run-diagnosis.js";
 import { createVscodeCandidateOpener } from "./ui/vscode-open.js";
 
@@ -122,14 +141,29 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
   const controller = new DiagnosisController();
   const proposalController = new FixProposalController();
+  const previewStore = new ProposedPreviewStore();
   const treeProvider = new DiagnosisTreeProvider(controller, proposalController);
   const treeView = vscode.window.createTreeView(DIAGNOSIS_VIEW_ID, {
     treeDataProvider: treeProvider,
     showCollapseAll: true,
   });
   treeProvider.attachView(treeView);
-  context.subscriptions.push(treeView);
+  context.subscriptions.push(treeView, registerProposedPreviewProvider(previewStore), {
+    dispose(): void {
+      previewStore.dispose();
+    },
+  });
   const candidateOpener = createVscodeCandidateOpener();
+  const reviewOpener = createVscodeReviewOpener();
+  const applyWriter = createVscodeApplyWriter();
+  const syncProposalContext = (): void => {
+    void vscode.commands.executeCommand(
+      "setContext",
+      HAS_FIX_PROPOSAL_CONTEXT,
+      proposalController.getProposal() !== undefined,
+    );
+  };
+  syncProposalContext();
 
   const startBridge = async (): Promise<void> => {
     if (bridge?.listening) {
@@ -175,6 +209,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
           token,
         );
         reportDiagnosisOutcome(channel, treeProvider, outcome);
+        previewStore.clear();
+        syncProposalContext();
       },
     );
   };
@@ -281,8 +317,14 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       await executeDiagnosis(false);
     }),
     vscode.commands.registerCommand(CLEAR_DIAGNOSIS_COMMAND, () => {
+      if (proposalController.isApplying()) {
+        showNotice(applyFixUserNotice({ status: "busy" }));
+        return;
+      }
       proposalController.clear();
       controller.clearDiagnosis();
+      previewStore.clear();
+      syncProposalContext();
       treeProvider.refresh();
       void vscode.window.showInformationMessage(DIAGNOSIS_CLEARED_MESSAGE);
     }),
@@ -316,9 +358,95 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
           }
           channel.show(true);
           treeProvider.refresh();
+          syncProposalContext();
+          previewStore.clear();
           showNotice(fixProposalUserNotice(outcome));
         },
       );
+    }),
+    vscode.commands.registerCommand(REVIEW_FIX_COMMAND, async () => {
+      const diagnosis = controller.getDiagnosis();
+      const proposal = proposalController.getProposal();
+      const reader = diagnosis === undefined ? undefined : createWorkspaceLiveFileReader(diagnosis.project);
+      const liveFiles =
+        proposal === undefined || reader === undefined
+          ? {}
+          : await snapshotLiveFiles(proposal, (relativePath) => reader.readText(relativePath));
+      const dirty = dirtyProposedPaths(proposal);
+      const prepared = prepareFixReview({
+        proposal,
+        diagnosis,
+        readLiveFile: (relativePath) => liveFiles[relativePath],
+        canonicalIo: nodeCanonicalIo,
+        isDirty: (relativePath) => dirty.has(relativePath),
+      });
+      if (prepared.status !== "ok") {
+        previewStore.clear();
+        channel.appendLine(logSafeReviewError(prepared.reason));
+        channel.show(true);
+        showNotice({ kind: "warn", message: userFacingReviewError(prepared.reason) });
+        return;
+      }
+      const opened = await publishAndOpenReview(
+        prepared,
+        previewStore,
+        reviewOpener,
+        proposal === undefined ? undefined : proposalPreviewOwner(proposal),
+      );
+      if (opened.status !== "opened") {
+        channel.appendLine("[Review] REVIEW_DIFF_FAILED");
+        channel.show(true);
+        void vscode.window.showWarningMessage(REVIEW_DIFF_FAILED_MESSAGE);
+        return;
+      }
+      void vscode.window.showInformationMessage(REVIEW_OPENED_MESSAGE);
+    }),
+    vscode.commands.registerCommand(REJECT_FIX_COMMAND, () => {
+      // Arguments from TreeView items or menus are intentionally ignored; the
+      // proposal to reject is always read from the live controller.
+      const observed = proposalController.getProposal();
+      const outcome = rejectFixProposal(proposalController, previewStore, observed);
+      for (const line of rejectFixLogLines(outcome)) {
+        channel.appendLine(line);
+      }
+      syncProposalContext();
+      treeProvider.refresh();
+      showNotice(rejectFixUserNotice(outcome));
+    }),
+    vscode.commands.registerCommand(APPLY_FIX_COMMAND, async () => {
+      const outcome = await runApplyFix({
+        proposalController,
+        previewStore,
+        getDiagnosis: () => controller.getDiagnosis(),
+        getDiagnosisGeneration: () => controller.getGeneration(),
+        isDiagnosisRunning: () => controller.isRunning(),
+        canonicalIo: nodeCanonicalIo,
+        readLiveFiles: async (proposal) => {
+          const diagnosis = controller.getDiagnosis();
+          if (diagnosis === undefined) {
+            return {};
+          }
+          return snapshotLiveFiles(proposal, (relativePath) =>
+            createWorkspaceLiveFileReader(diagnosis.project).readText(relativePath),
+          );
+        },
+        dirtyPaths: (proposal) => dirtyProposedPaths(proposal),
+        confirm: async (fileCount) => {
+          const choice = await vscode.window.showWarningMessage(applyConfirmMessage(fileCount), { modal: true }, "Apply");
+          return choice === "Apply";
+        },
+        write: (plan) => applyWriter.write(plan),
+      });
+      for (const line of applyFixLogLines(outcome)) {
+        channel.appendLine(line);
+      }
+      channel.show(true);
+      if (outcome.status === "applied") {
+        previewStore.clear();
+      }
+      syncProposalContext();
+      treeProvider.refresh();
+      showNotice(applyFixUserNotice(outcome));
     }),
     vscode.commands.registerCommand(OPEN_CANDIDATE_COMMAND, async (relativePath: unknown) => {
       if (typeof relativePath !== "string") {
@@ -341,6 +469,10 @@ function createWorkspaceLiveFileReader(project: ProjectContext): LiveFileReader 
     async readText(relativePath: string): Promise<string | undefined> {
       const candidate = project.candidates.find((item) => item.relativePath === relativePath);
       const workspaceRoot = candidate?.workspaceRoot ?? project.workspaceRoot;
+      const inspection = inspectWorkspacePath(workspaceRoot, relativePath);
+      if (!inspection.safe) {
+        return undefined;
+      }
       const folder = vscode.workspace.workspaceFolders?.find(
         (item) => normalizeFsPath(item.uri.fsPath) === normalizeFsPath(workspaceRoot),
       );
@@ -348,7 +480,7 @@ function createWorkspaceLiveFileReader(project: ProjectContext): LiveFileReader 
         return undefined;
       }
       try {
-        const uri = vscode.Uri.joinPath(folder.uri, ...relativePath.split("/"));
+        const uri = vscode.Uri.joinPath(folder.uri, ...inspection.relativePath.split("/"));
         const bytes = await vscode.workspace.fs.readFile(uri);
         return Buffer.from(bytes).toString("utf8");
       } catch {
@@ -356,6 +488,30 @@ function createWorkspaceLiveFileReader(project: ProjectContext): LiveFileReader 
       }
     },
   };
+}
+
+function dirtyProposedPaths(proposal: StoredProposal | undefined): Set<string> {
+  const dirty = new Set<string>();
+  if (proposal === undefined) {
+    return dirty;
+  }
+  const proposed = new Set(
+    proposal.proposedChange.changes
+      .map((change) => change.relativePath)
+      .filter((item): item is string => typeof item === "string"),
+  );
+  for (const document of vscode.workspace.textDocuments) {
+    if (!document.isDirty || document.uri.scheme !== "file") {
+      continue;
+    }
+    for (const folder of vscode.workspace.workspaceFolders ?? []) {
+      const relative = normalizeFsPath(path.relative(folder.uri.fsPath, document.uri.fsPath));
+      if (proposed.has(relative)) {
+        dirty.add(relative);
+      }
+    }
+  }
+  return dirty;
 }
 
 export async function deactivate(): Promise<void> {

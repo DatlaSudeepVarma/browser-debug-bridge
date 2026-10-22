@@ -1,6 +1,8 @@
 import type { StoredProposal } from "./types.js";
 
-export type ProposalLastOutcome = "none" | "failed" | "cancelled";
+export type ProposalLastOutcome = "none" | "failed" | "cancelled" | "rejected" | "applied";
+
+export type RejectProposalResult = "rejected" | "no-proposal" | "stale" | "busy";
 
 export interface ProposalTreeState {
   generating: boolean;
@@ -11,6 +13,7 @@ export interface ProposalTreeState {
 export class FixProposalController {
   private current: StoredProposal | undefined;
   private generating = false;
+  private applying = false;
   private lastOutcome: ProposalLastOutcome = "none";
 
   public getProposal(): StoredProposal | undefined {
@@ -30,8 +33,12 @@ export class FixProposalController {
     this.lastOutcome = "none";
   }
 
+  public isApplying(): boolean {
+    return this.applying;
+  }
+
   public beginRun(): boolean {
-    if (this.generating) {
+    if (this.generating || this.applying) {
       return false;
     }
     this.generating = true;
@@ -40,6 +47,28 @@ export class FixProposalController {
 
   public endRun(): void {
     this.generating = false;
+  }
+
+  public beginApply(): boolean {
+    if (this.generating || this.applying) {
+      return false;
+    }
+    this.applying = true;
+    return true;
+  }
+
+  public endApply(): void {
+    this.applying = false;
+  }
+
+  /** Drops `expected` after a verified write. A newer proposal is left in place. */
+  public consumeApplied(expected: StoredProposal): boolean {
+    if (this.current !== expected) {
+      return false;
+    }
+    this.current = undefined;
+    this.lastOutcome = "applied";
+    return true;
   }
 
   public applySuccess(proposal: StoredProposal): void {
@@ -53,6 +82,26 @@ export class FixProposalController {
 
   public applyCancelled(): void {
     this.lastOutcome = "cancelled";
+  }
+
+  /**
+   * Discards `expected` only if it is still the current proposal. A proposal
+   * that replaced it in the meantime is left untouched. The diagnosis is not
+   * affected; the developer can propose again.
+   */
+  public reject(expected: StoredProposal | undefined): RejectProposalResult {
+    if (this.applying) {
+      return "busy";
+    }
+    if (this.current === undefined) {
+      return "no-proposal";
+    }
+    if (expected === undefined || this.current !== expected) {
+      return "stale";
+    }
+    this.current = undefined;
+    this.lastOutcome = "rejected";
+    return "rejected";
   }
 
   public belongsTo(identity: { sessionId: string; diagnosisFingerprint: string }): boolean {

@@ -10,7 +10,7 @@ import {
   type ProtocolError,
 } from "@browser-debug-bridge/schema";
 import { DiagnosisService } from "../ai/diagnosis.js";
-import { FAKE_DIAGNOSIS, FakeAiProvider } from "../ai/fake-provider.js";
+import { FAKE_DIAGNOSIS, FakeAiProvider, FailingAiProvider } from "../ai/fake-provider.js";
 import { createFixtureAiProjectContext } from "../ai/test-support.js";
 import type { Diagnosis } from "../ai/types.js";
 import { BridgeServer } from "../bridge/server.js";
@@ -18,10 +18,14 @@ import { generatePairingToken } from "../bridge/crypto.js";
 import { FAKE_FIX_PROPOSAL, jsonProposal } from "../fix/fake-proposal.js";
 import { sha256Utf8 } from "../fix/hash.js";
 import { createMemoryLiveFileReader } from "../fix/live-file.js";
+import { ProposedPreviewStore } from "../fix/preview-store.js";
 import { FixProposalService } from "../fix/proposal.js";
 import { FixProposalController } from "../fix/proposal-state.js";
+import { rejectFixProposal } from "../fix/reject-fix.js";
+import { runApplyFix } from "../fix/run-apply.js";
 import { runFixProposal } from "../fix/run-proposal.js";
 import { memoryWorkspaceCanonicalIo } from "../fix/test-support.js";
+import { ManualCancellationToken } from "../project/cancellation.js";
 import { MemoryWorkspaceAccess } from "../project/memory-access.js";
 import { ProjectIntelligenceService } from "../project/service.js";
 import {
@@ -264,6 +268,191 @@ describe("phase 11 fake end-to-end workflow", () => {
     );
     assert.equal(proposalOutcome.status, "replaced");
     proposalController.clear();
+    assert.equal(proposalController.getProposal(), undefined);
+    assert.equal(sha256File(FIXTURE_CHECKOUT_ON_DISK), before);
+  });
+
+  it("keeps the previous diagnosis when the model fails or the run is cancelled", async () => {
+    const session = createProjectIntelligenceSession();
+    const project = await analyzeCheckoutSession();
+    const controller = new DiagnosisController();
+    const failed = await runDiagnosis(
+      controller,
+      {
+        getLatestSession: () => session,
+        analyze: async () => project,
+        diagnose: (current, context, token) =>
+          new DiagnosisService(new FailingAiProvider()).diagnose(current, context, token),
+      },
+      { allowCreateSession: false },
+    );
+    assert.equal(failed.status, "preserved");
+    if (failed.status === "preserved") {
+      assert.equal(failed.result.error.code, "AI_REQUEST_FAILED");
+    }
+    assert.equal(controller.getDiagnosis(), undefined);
+
+    const token = new ManualCancellationToken();
+    token.cancel();
+    const cancelled = await runDiagnosis(
+      controller,
+      {
+        getLatestSession: () => session,
+        analyze: async () => project,
+        diagnose: (current, context, diagnoseToken) =>
+          new DiagnosisService(new FakeAiProvider(JSON.stringify(FAKE_DIAGNOSIS))).diagnose(
+            current,
+            context,
+            diagnoseToken,
+          ),
+      },
+      { allowCreateSession: false },
+      token,
+    );
+    assert.equal(cancelled.status, "cancelled");
+    assert.equal(controller.getDiagnosis(), undefined);
+  });
+
+  it("rejects a malicious proposal, a stale file, a dirty buffer, and a rejected proposal before an approved apply", async () => {
+    const before = sha256File(FIXTURE_CHECKOUT_ON_DISK);
+    const project = await analyzeCheckoutSession();
+    const candidate = rankedCandidateWithExcerpt(project.context);
+    const diagnosis = diagnosisForCandidate(candidate.relativePath);
+    const files = createFixtureFileMap();
+    const original = files[candidate.relativePath] ?? "";
+    const diagnosisController = new DiagnosisController();
+    const proposalController = new FixProposalController();
+    const canonicalIo = memoryWorkspaceCanonicalIo(FIXTURE_FOLDER_ROOT, Object.keys(files));
+    const diagnosed = await runDiagnosis(
+      diagnosisController,
+      {
+        getLatestSession: () => createProjectIntelligenceSession(),
+        analyze: async () => project,
+        diagnose: (current, context, token) =>
+          new DiagnosisService(new FakeAiProvider(JSON.stringify(diagnosis))).diagnose(current, context, token),
+      },
+      { allowCreateSession: false, proposalController },
+    );
+    assert.equal(diagnosed.status, "replaced");
+
+    const malicious = await runFixProposal(
+      diagnosisController.getDiagnosis(),
+      proposalController,
+      (state, token) =>
+        fixtureLiveProposalService(
+          new FakeAiProvider(
+            jsonProposal({
+              ...proposalForCandidate(candidate),
+              changes: [
+                {
+                  relativePath: "../../secret.ts",
+                  edits: [{ startLine: 1, endLine: 1, replacement: "process.exit(1)" }],
+                },
+              ],
+            }),
+          ),
+        ).propose(state.session, state.project, state.diagnosis, token),
+    );
+    assert.equal(malicious.status, "preserved");
+    assert.equal(proposalController.getProposal(), undefined);
+
+    const proposed = await runFixProposal(
+      diagnosisController.getDiagnosis(),
+      proposalController,
+      (state, token) =>
+        fixtureLiveProposalService(new FakeAiProvider(jsonProposal(proposalForCandidate(candidate)))).propose(
+          state.session,
+          state.project,
+          state.diagnosis,
+          token,
+        ),
+    );
+    assert.equal(proposed.status, "replaced");
+    const proposal = proposalController.getProposal();
+    assert.ok(proposal);
+
+    const stale = await runApplyFix({
+      proposalController,
+      previewStore: new ProposedPreviewStore(),
+      getDiagnosis: () => diagnosisController.getDiagnosis(),
+      getDiagnosisGeneration: () => diagnosisController.getGeneration(),
+      isDiagnosisRunning: () => false,
+      readLiveFiles: async () => ({ [candidate.relativePath]: `${original}\n// stale` }),
+      dirtyPaths: () => new Set<string>(),
+      canonicalIo,
+      confirm: async () => true,
+      write: async () => {
+        throw new Error("stale file must not be written");
+      },
+    });
+    assert.equal(stale.status, "refused");
+    if (stale.status === "refused") {
+      assert.equal(stale.reason.code, "APPLY_SOURCE_CHANGED");
+    }
+
+    const dirty = await runApplyFix({
+      proposalController,
+      previewStore: new ProposedPreviewStore(),
+      getDiagnosis: () => diagnosisController.getDiagnosis(),
+      getDiagnosisGeneration: () => diagnosisController.getGeneration(),
+      isDiagnosisRunning: () => false,
+      readLiveFiles: async () => ({ [candidate.relativePath]: original }),
+      dirtyPaths: () => new Set([candidate.relativePath]),
+      canonicalIo,
+      confirm: async () => true,
+      write: async () => {
+        throw new Error("dirty buffer must not be written");
+      },
+    });
+    assert.equal(dirty.status, "refused");
+    if (dirty.status === "refused") {
+      assert.equal(dirty.reason.code, "REVIEW_SOURCE_DIRTY");
+    }
+
+    const rejected = rejectFixProposal(proposalController, new ProposedPreviewStore(), proposal);
+    assert.equal(rejected.status, "rejected");
+    assert.equal(proposalController.getProposal(), undefined);
+    assert.equal(diagnosisController.getDiagnosis()?.diagnosis.summary, diagnosis.summary);
+
+    const again = await runFixProposal(
+      diagnosisController.getDiagnosis(),
+      proposalController,
+      (state, token) =>
+        fixtureLiveProposalService(new FakeAiProvider(jsonProposal(proposalForCandidate(candidate)))).propose(
+          state.session,
+          state.project,
+          state.diagnosis,
+          token,
+        ),
+    );
+    assert.equal(again.status, "replaced");
+    const approved = proposalController.getProposal();
+    assert.ok(approved);
+    proposalController.markReviewed(approved);
+    let confirmedPaths: readonly string[] = [];
+    const applied = await runApplyFix({
+      proposalController,
+      previewStore: new ProposedPreviewStore(),
+      getDiagnosis: () => diagnosisController.getDiagnosis(),
+      getDiagnosisGeneration: () => diagnosisController.getGeneration(),
+      isDiagnosisRunning: () => false,
+      readLiveFiles: async () => ({ ...files }),
+      dirtyPaths: () => new Set<string>(),
+      canonicalIo,
+      confirm: async (paths) => {
+        confirmedPaths = paths;
+        return true;
+      },
+      write: async (plan) => {
+        for (const file of plan.files) {
+          files[file.relativePath] = file.proposedContent;
+        }
+        return { status: "applied" };
+      },
+    });
+    assert.equal(applied.status, "applied");
+    assert.equal(confirmedPaths.includes(candidate.relativePath), true);
+    assert.equal(files[candidate.relativePath]?.includes("// bdb-test"), true);
     assert.equal(proposalController.getProposal(), undefined);
     assert.equal(sha256File(FIXTURE_CHECKOUT_ON_DISK), before);
   });

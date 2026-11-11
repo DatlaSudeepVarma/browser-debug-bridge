@@ -2,141 +2,246 @@
 
 Browser debugging session → project-aware diagnosis → proposed code fix.
 
-## What this project is
+Browser Debug Bridge is a local-first tool. The Chrome extension captures the current tab. The VS Code extension stores that session on a loopback HTTP bridge, ranks files in the open workspace, asks `vscode.lm` for a diagnosis and a proposed edit, and writes files only after you review the proposal and confirm Apply.
 
-Browser Debug Bridge is a **local-first** developer tool. It is designed to take a Chrome debugging session, diagnose the issue in the context of the open VS Code project, and propose a code fix for the developer to approve before anything is applied.
+Nothing in this repository sends session data to a project-owned cloud backend. The language model is the one selected by VS Code (`vscode.lm`).
 
-The intended flow is:
+## Key features
+
+- Element picker on the tab where you start capture (`activeTab` and `scripting`)
+- Bounded DOM and computed-CSS capture, with shared redaction
+- Cropped JPEG of the selected visible region (max 1600×1200, about 1 MB), uploaded separately from the session JSON
+- The most recent 50 console entries and the most recent 100 network **failures** for that capture
+- Loopback bridge at `127.0.0.1:17321` with a pairing token, Origin checks, body limits, and in-memory session storage
+- Ranked workspace candidates and bounded source excerpts
+- Read-only diagnosis and an in-memory unified diff
+- Diagnosis view in the activity bar (`browserDebugBridge.diagnosis`)
+- Review in a VS Code diff, Reject without writing, and Apply through one `WorkspaceEdit` after confirmation
+
+Diagnosis and Propose Fix do not modify workspace files.
+
+## System architecture
 
 ```text
 Chrome element picker
         ↓
-Bounded DOM/CSS capture
+DOM, CSS, console, and network-failure capture
         ↓
-Screenshot capture
+Cropped JPEG upload, then DebugSessionV1
         ↓
-Console and network failure capture
+HTTP bridge on 127.0.0.1:17321
         ↓
-DebugSessionV1
+Project intelligence
         ↓
-Authenticated local bridge
+vscode.lm diagnosis
         ↓
-Project Intelligence
+Diagnosis TreeView
         ↓
-AI Diagnosis
+In-memory fix proposal and unified diff
         ↓
-VS Code TreeView
+Review (required) → Reject, or confirm Apply
         ↓
-AI Fix Proposal
-        ↓
-Validated Unified Diff
-        ↓
-Native VS Code Diff
-        ↓
-Explicit Apply / Reject
-        ↓
-Validated workspace modification
-        ↓
-Developer verifies the result
+WorkspaceEdit, save, then a full-file hash check
 ```
 
-No cloud backend is part of V1. Session metadata stays on the developer's machine except for the configured AI provider (`vscode.lm`).
-
-## Current development status
-
-Phases 1–9 and the Apply/Reject review path are implemented. A captured Chrome session is stored on the local bridge and can be diagnosed with **Diagnose Latest Session**. **Diagnose Test Session** creates a synthetic session and does not replace a captured one.
-
-Apply writes through one `WorkspaceEdit` after a second safety plan and an explicit confirmation. A failed save rolls back files that were already saved. A post-write hash mismatch restores the previous contents.
-
-The following are **not implemented**:
-
-- WebSocket events
-- Screenshot bytes sent to a multimodal model, or shown in the Diagnosis view
-- Marketplace publication
-
-Do not treat this tree as production-ready. See [docs/architecture.md](docs/architecture.md) for the security checklist and remaining risks.
-
-## Architecture overview
-
-The repository is a pnpm + TypeScript monorepo:
-
-| Area | Role |
+| Piece | Role |
 | --- | --- |
-| Chrome extension | Manifest V3: pair, pick an element, capture a cropped JPEG, session-scoped console and network failure metadata, submit a sanitized DebugSession |
-| VS Code extension | Owns the local loopback HTTP bridge, project intelligence, read-only AI diagnosis, diagnosis TreeView, and in-memory fix proposals |
-| `@browser-debug-bridge/schema` | DebugSession V1 and protocol message Zod schemas |
-| `@browser-debug-bridge/redaction` | URL, DOM, text, and workspace-path sanitization |
-| Local bridge | HTTP on `127.0.0.1:17321` inside the VS Code extension process |
-| AI providers | Provider-neutral interface; first implementation is `vscode.lm` (no external AI SDKs) |
+| `apps/chrome-extension` | Manifest V3 popup, picker, capture, and bridge client |
+| `apps/vscode-extension` | Bridge, project intelligence, diagnosis, proposal, review, reject, and apply |
+| `packages/schema` | `DebugSessionV1` and protocol Zod schemas |
+| `packages/redaction` | URL, DOM, text, and workspace-path checks |
 
-See [docs/architecture.md](docs/architecture.md) for the decided architecture.
+The bridge runs inside the VS Code extension process. It starts when the extension activates and stops when the extension deactivates. There is no WebSocket endpoint.
 
-## Repository structure
-
-```
-browser-debug-bridge/
-├── apps/
-│   ├── chrome-extension/
-│   └── vscode-extension/
-├── packages/
-│   ├── schema/
-│   └── redaction/
-├── docs/
-├── package.json
-├── pnpm-workspace.yaml
-└── tsconfig.base.json
-```
-
-## Supported environment
+## Prerequisites
 
 - Node.js 20 or later
-- pnpm 9 or later
-- Google Chrome (Manifest V3 unpacked extension)
-- Visual Studio Code 1.90 or later (Extension Development Host)
-- A `vscode.lm` language model for live diagnosis/proposals (tests use `FakeAiProvider`)
+- pnpm 9 or later (this repo pins `pnpm@10.17.1`)
+- Google Chrome, for an unpacked Manifest V3 extension
+- Visual Studio Code 1.90 or later
+- A `vscode.lm` language model for a live diagnosis or proposal
 
-Chrome permissions remain `storage`, `activeTab`, `scripting`, plus host permission `http://127.0.0.1:17321/*`. There is no `<all_urls>`, `debugger`, `cookies`, or `webRequest` permission.
+Tests do not call `vscode.lm`. They use `FakeAiProvider`.
 
-## Development setup
+Chrome permissions are `storage`, `activeTab`, and `scripting`, plus host permission `http://127.0.0.1:17321/*`. The manifest does not request `<all_urls>`, `debugger`, `cookies`, or `webRequest`.
+
+## Installation
+
+From the repository root:
 
 ```bash
+corepack enable
+corepack prepare pnpm@10.17.1 --activate
 pnpm install
-pnpm typecheck
 pnpm build
-pnpm test
-pnpm lint
 ```
 
-Full commands, pairing, packaging, and manual checks are in [docs/development.md](docs/development.md).
+On Windows, if Corepack cannot write shims, `npm install -g pnpm@10.17.1` is the fallback documented in [docs/development.md](docs/development.md). Use pnpm for workspace dependencies.
 
-## Current V1 scope
+`pnpm build` builds the schema package, the redaction package, the Chrome extension (`apps/chrome-extension/dist`), and the VS Code extension (`apps/vscode-extension/out`).
 
-- Session-scoped element picker on the current tab (`activeTab` + `scripting`)
-- Bounded selected-element, DOM, and computed-CSS capture with shared redaction
-- Cropped JPEG screenshot of the selected visible region (max 1600×1200, ~1 MB), uploaded separately from session JSON
-- Session-scoped console capture (most recent 50 entries)
-- Session-scoped network **failure metadata** (most recent 100 entries) — not a HAR recorder
-- Local HTTP bridge on `127.0.0.1:17321` with Bearer pairing, Origin checks, body limits, session/screenshot caps, requestId replay cache, and duplicate-session rejection
-- Deterministic project intelligence: workspace-jailed discovery, ranked candidate files, bounded excerpts
-- Read-only AI diagnosis from `DebugSessionV1` + bounded `ProjectContext` only
-- Native VS Code TreeView (`browserDebugBridge.diagnosis`)
-- In-memory proposed change + validated unified diff, candidate-allowlisted and size-bounded
+## Chrome extension setup
 
-**Generating a diagnosis or a proposal does not modify workspace files.** Apply is a separate command. It writes only after confirmation, and only when the full-file hash and the stored diff still match the proposal.
+1. `pnpm build:chrome`
+2. Open `chrome://extensions`
+3. Turn on **Developer mode**
+4. **Load unpacked** and choose `apps/chrome-extension/dist`
+5. Copy the extension ID shown on that card
 
-## Security and privacy boundaries
+The popup is the toolbar action **Browser Debug Bridge**. It is a development UI: paste a token, pair, check bridge health, start or cancel capture, or submit a synthetic test session.
 
-- Chrome talks only to `http://127.0.0.1:17321`. It does not send capture data to an unapproved remote service.
-- Pairing tokens live in VS Code `SecretStorage` and Chrome `storage.local`. They are not placed in DebugSession payloads or logs.
-- Authorization headers, cookies, request/response bodies, and unrelated storage are not captured.
-- Screenshot bytes are stored in memory, out of band from session JSON, and are not sent to the model.
-- Heuristic redaction is **not** perfect secret detection. JWTs, obvious API-key query names, and a small set of sensitive field names are redacted; unknown secrets can still appear in DOM text, console messages, or screenshots.
-- `inspectWorkspacePath` is a lexical jail. Canonical/realpath checks run on proposed fix paths when the workspace exists on disk. Lexical checks alone do not stop symlink attacks; that is why canonical inspection exists.
-- Native Apply is absent, so the product cannot currently write a proposed patch. Future Apply must re-read the file, compare `originalContentHash`, and refuse stale or escaped targets.
+`pnpm --filter @browser-debug-bridge/chrome-extension dev` watches the main Vite build only. After changes to the content script or the console and network hooks, run `pnpm build:chrome` again.
 
-## V1 exclusions
+## VS Code extension setup
 
-Autonomous agents, automatic code fixing without approval, cloud backends, team collaboration, browsers other than Chrome, extra AI provider SDKs, screenshot vision, full HAR recording, arbitrary workspace scanning, and marketplace publication.
+1. Open this repository in VS Code.
+2. Run and Debug → **Run VS Code Extension** (F5).
+
+That launch config uses `.vscode/launch.json` and the `build-vscode-extension` preLaunch task. The Extension Development Host loads `apps/vscode-extension`.
+
+In the Extension Development Host:
+
+1. Open the workspace you want to diagnose.
+2. Set **Browser Debug Bridge: Chrome Extension Id** (`browserDebugBridge.chromeExtensionId`) to the ID from `chrome://extensions`.
+3. Run **Browser Debug Bridge: Stop Local Bridge**, then **Browser Debug Bridge: Start Local Bridge**, or reload the Extension Development Host, so the bridge reads the new ID.
+
+Until that setting matches the Chrome extension, browser requests are rejected with `ORIGIN_NOT_ALLOWED`. The bridge still starts on activation. If `127.0.0.1:17321` is already taken, activation reports that the local bridge could not start.
+
+There is no marketplace package script in this repository. The extension is used from the Extension Development Host.
+
+## Local bridge pairing
+
+The pairing token is 32 random bytes, shown as 64 hex characters. It is stored in VS Code SecretStorage under `browserDebugBridge.pairingToken` and, after a successful pair, in Chrome `chrome.storage.local`.
+
+1. In the Extension Development Host, run **Browser Debug Bridge: Show Pairing Code**.
+2. Copy the token from the input box. Do not paste it into logs or chat.
+3. Open the Chrome popup, paste the token, and click **Pair with VS Code**.
+4. **Check health** should report the bridge status and the extension version.
+
+`POST /pair` checks the token. Session and screenshot calls then send `Authorization: Bearer <token>`. A wrong token is not stored. **Check health** and pair-status do not require the token. Session, screenshot, and ack calls do.
+
+Chrome requests include an `Origin` of `chrome-extension://<id>`. That value must match `browserDebugBridge.chromeExtensionId`.
+
+## How to start a debugging session
+
+On the page you want to inspect:
+
+1. Pair first. **Start Debug Session** refuses to start when no token is stored, and it checks that the bridge answers `/health`.
+2. Click **Start Debug Session**.
+3. Hover to highlight, click an element, then enter an optional description. Escape or **Cancel capture** cancels.
+4. The extension uploads the cropped JPEG, then submits the session.
+
+A captured session (a real browser version, not the synthetic `0.0.0-fake` version) shows **Chrome debug session received.** in VS Code, with a **Diagnose** action for that session id.
+
+**Submit test session** in the popup, **Diagnose Test Session**, and **Create Test Session** use a synthetic session. A later synthetic session does not replace the latest captured session.
+
+**Diagnose Latest Session** and **Refresh Diagnosis** use the newest captured session. They do not create one. Open a workspace folder first. The activity-bar view is **Browser Debug Bridge → Diagnosis**.
+
+**Analyze Test Session** prints a project-intelligence summary. It does not call the language model.
+
+## How AI diagnosis works
+
+**Diagnose Latest Session**, **Refresh Diagnosis**, **Diagnose Test Session**, or the notification's **Diagnose** action runs project intelligence, then `vscode.lm`.
+
+Project intelligence searches the open workspace, drops ignored and sensitive paths, and ranks at most 12 candidate files with bounded excerpts. The model sees the serialized session and those excerpts. It does not receive screenshot bytes, a filesystem API, or a workspace-edit API. `vscode.lm` is called with two User messages because that API has no system role. If several models exist, the extension picks the first after a stable vendor, family, and id sort. If none exist, the result is `AI_UNAVAILABLE` and the previous diagnosis is kept.
+
+The Diagnosis view shows the summary, hypotheses, evidence, and candidate files. Model text is shown as plain text.
+
+**Propose Fix** asks the model for structured edits inside those candidate excerpts, checks the result, and stores an in-memory unified diff. The completion message is: `In-memory proposed change ready. No workspace files were modified.`
+
+## How to review, reject, and apply proposed fixes
+
+These commands are implemented. They appear on the Diagnosis view title when a proposal exists.
+
+1. **Review Proposed Fix** opens a read-only VS Code diff of each planned file. The proposal is not writable until this has been opened for the current proposal. A new proposal must be reviewed again.
+2. **Reject Proposed Fix** drops the in-memory proposal and its preview. The diagnosis stays. No file is written.
+3. **Apply Proposed Fix** plans the edit again, asks you to confirm, and names the relative paths in the dialog. Confirming runs one `WorkspaceEdit`, then saves. Success is reported only when the saved bytes match the planned full-file hash.
+
+Apply refuses the write when:
+
+- Review has not been opened for this proposal
+- you cancel the confirmation
+- a target buffer is dirty
+- the full-file hash no longer matches the proposal
+- the stored diff does not match the edits
+- the path is not a diagnosis candidate, fails the lexical jail, or fails the canonical path check
+
+If a later save fails, files that were already saved are written back to their previous contents. If the post-write hash does not match, Apply restores those contents when it can, and names the relative paths when it cannot.
+
+A crash during a multi-file save can still leave a subset of files updated. Apply does not retry on its own.
+
+**Clear Diagnosis** drops the diagnosis, the proposal, and the preview, unless Apply is already running.
+
+## Security and privacy model
+
+- The bridge listens on `127.0.0.1` only, port `17321`.
+- A browser `Origin` must be `chrome-extension://` plus the configured extension ID. A request with no `Origin` is accepted so local curl can reach the bridge. That does not allow a normal page fetch, which sends its own `Origin`.
+- The pairing token is compared with a timing-safe check when the lengths match. It is not written into session JSON or bridge logs.
+- JSON bodies stop at 5 MB. JPEG bodies stop at 1 MB and must start with JPEG magic bytes. At most 20 sessions and 20 screenshots are kept in memory. They are cleared when the bridge stops.
+- `requestId` values are kept for the life of the bridge process. Reusing one for a different session is rejected. Submitting the same body again does not make that session the latest.
+- A different payload for an existing session id is rejected.
+- URLs, DOM fields, and console text pass through redaction before submit. Routing query names such as `id`, `q`, and `page` can keep their values. Other query values, token-like URL fragments, JWTs, and `Bearer` tokens in text are redacted.
+- Screenshot bytes stay in the bridge process. The model receives mime, size, hash, and whether the image was cropped.
+- Proposed paths must be diagnosis candidates. Lexical checks reject traversal, absolute paths outside the workspace, UNC paths, and sensitive basenames such as `.env` and private-key names. Apply also resolves `realpath` and opens that real path immediately before `WorkspaceEdit`.
+- Apply cannot run by itself. Review and the confirmation dialog are required.
+
+## Known limitations
+
+- Redaction is heuristic. A secret that does not match those shapes can remain in DOM text, console text, or the cropped screenshot. Screenshots are not OCR'd.
+- While capture is active, a page script can dispatch `bdb:console` or `bdb:network`. Those events are recorded like hook events. Treat captured page text as untrusted. Apply still requires Review and confirmation.
+- Console and network buffers live in the extension service worker. A worker restart drops them.
+- Screenshot bytes are not shown in the Diagnosis view and are not sent to the model.
+- There is no WebSocket stream and no marketplace package.
+- `vscode.lm` has to be available for a live diagnosis. The automated tests never call it.
+- Multi-file Apply is not an atomic disk transaction.
+
+## Troubleshooting
+
+Messages in the UI stay short. The **Browser Debug Bridge** output channel records error codes, not prompts, tokens, or source text.
+
+| What you see | What to check |
+| --- | --- |
+| Local bridge could not start | Something else is bound to `127.0.0.1:17321`, or the Extension Development Host did not activate. |
+| Bridge unavailable in the popup | The Extension Development Host is not running, or **Start Local Bridge** was not run after a stop. |
+| Pairing fails or HTTP 401 | The token does not match SecretStorage. Show the pairing code again and pair again. A rejected token is not saved. |
+| `ORIGIN_NOT_ALLOWED` | `browserDebugBridge.chromeExtensionId` does not match the ID on `chrome://extensions`. Restart the bridge after changing it. |
+| Invalid session or screenshot | The JPEG was missing, was not a JPEG, was over 1 MB, or its SHA-256 did not match the session. |
+| No debug session | Capture a page, or use **Diagnose Test Session**. **Refresh Diagnosis** does not create a session. A synthetic session is not used by **Diagnose Latest Session**. |
+| Open a workspace folder | No workspace folder is open in the Extension Development Host. |
+| AI provider unavailable | No `vscode.lm` model is available. The previous diagnosis is kept. |
+| AI response invalid | The model JSON failed validation. The previous diagnosis or proposal is kept. |
+| Review before applying | Run **Review Proposed Fix** for this proposal, then Apply. |
+| Dirty buffer or source changed | Save or revert the file, or propose again. Apply will not overwrite a dirty buffer or a file whose full-file hash moved. |
+| Apply could not restore a file | The warning lists the relative paths. Check those files before editing further. |
+
+## Development and testing
+
+```bash
+pnpm typecheck
+pnpm lint
+pnpm test
+```
+
+`pnpm typecheck` builds `@browser-debug-bridge/schema` and `@browser-debug-bridge/redaction` first, because other packages import their `dist` output, then typechecks each package.
+
+`pnpm test` runs the Node test runner through `tsx` in the schema, redaction, Chrome, and VS Code packages. Bridge tests listen on an ephemeral `127.0.0.1` port. They do not launch Chrome or the Extension Development Host. Workflow tests check that `apps/vscode-extension/test-fixtures/fixture-project` is unchanged on disk. Apply is tested with an in-memory document writer, not a live `WorkspaceEdit`.
+
+Package filters:
+
+```bash
+pnpm --filter @browser-debug-bridge/schema test
+pnpm --filter @browser-debug-bridge/redaction test
+pnpm --filter @browser-debug-bridge/chrome-extension test
+pnpm --filter browser-debug-bridge-vscode test
+```
+
+A fixture page with sample API routes is available:
+
+```bash
+pnpm --filter @browser-debug-bridge/chrome-extension fixture-server
+```
+
+More detail is in [docs/development.md](docs/development.md) and [docs/architecture.md](docs/architecture.md).
 
 ## License
 

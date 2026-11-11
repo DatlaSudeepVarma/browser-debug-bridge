@@ -62,16 +62,12 @@ import {
 import { openCandidateFile } from "./ui/open-candidate.js";
 import { logSafeReviewError, userFacingReviewError } from "./ui/review-errors.js";
 import { createVscodeReviewOpener, registerProposedPreviewProvider } from "./ui/review-diff.js";
+import { clearDiagnosisView, selectDiagnosisSession, type DiagnosisSelection } from "./ui/diagnosis-selection.js";
 import { runDiagnosis, type DiagnosisRunOutcome } from "./ui/run-diagnosis.js";
 import { createVscodeCandidateOpener } from "./ui/vscode-open.js";
 
 let bridge: BridgeServer | undefined;
 let onCapturedSession: ((session: DebugSessionV1) => void) | undefined;
-
-type DiagnosisSelection =
-  | { source: "captured" }
-  | { source: "synthetic"; allowCreate: boolean }
-  | { source: "id"; sessionId: string };
 
 function createLogger(channel: vscode.OutputChannel): BridgeLogger {
   return {
@@ -198,18 +194,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         const outcome = await runDiagnosis(
           controller,
           {
-            getLatestSession: () => {
-              if (bridge === undefined) {
-                return undefined;
-              }
-              if (selection.source === "id") {
-                return bridge.getSession(selection.sessionId);
-              }
-              if (selection.source === "synthetic") {
-                return bridge.latestSyntheticSession();
-              }
-              return bridge.latestCapturedSession();
-            },
+            getLatestSession: () => selectDiagnosisSession(selection, bridge),
             createSessionIfMissing: () =>
               bridge?.listening === true ? bridge.createTestSession() : createFakeDebugSessionV1(),
             analyze: (session, analyzeToken) => {
@@ -360,13 +345,15 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       await executeDiagnosis({ source: "captured" });
     }),
     vscode.commands.registerCommand(CLEAR_DIAGNOSIS_COMMAND, () => {
-      if (proposalController.isApplying()) {
+      const cleared = clearDiagnosisView({
+        diagnosis: controller,
+        proposals: proposalController,
+        clearPreview: () => previewStore.clear(),
+      });
+      if (cleared === "busy") {
         showNotice(applyFixUserNotice({ status: "busy" }));
         return;
       }
-      proposalController.clear();
-      controller.clearDiagnosis();
-      previewStore.clear();
       syncProposalContext();
       treeProvider.refresh();
       void vscode.window.showInformationMessage(DIAGNOSIS_CLEARED_MESSAGE);

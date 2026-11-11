@@ -22,10 +22,10 @@ describe("evidence references", () => {
 
   it("formats human-readable labels without dumping payloads", () => {
     assert.equal(formatEvidenceLabel("BROWSER.page"), "Page");
-    assert.equal(formatEvidenceLabel("BROWSER.console[2]"), "Console #2");
-    assert.equal(formatEvidenceLabel("BROWSER.network[1]"), "Network #1");
-    assert.equal(formatEvidenceLabel("PROJECT.candidate[0]"), "Candidate #0");
-    assert.equal(formatEvidenceLabel("PROJECT.candidate[0].excerpt[1]"), "Excerpt #1");
+    assert.equal(formatEvidenceLabel("BROWSER.console[2]"), "Console");
+    assert.equal(formatEvidenceLabel("BROWSER.network[1]"), "Network");
+    assert.equal(formatEvidenceLabel("PROJECT.candidate[0]"), "Candidate file");
+    assert.equal(formatEvidenceLabel("PROJECT.candidate[0].excerpt[1]"), "Excerpt");
   });
 
   it("classifies browser versus project evidence", () => {

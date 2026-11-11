@@ -10,8 +10,8 @@ function opener(options: { existing?: ReadonlySet<string>; opened?: string[] } =
     async exists(_folderRoot, relativePath): Promise<boolean> {
       return existing.has(relativePath);
     },
-    async open(_folderRoot, relativePath): Promise<void> {
-      opened.push(relativePath);
+    async open(_folderRoot, relativePath, line?: number): Promise<void> {
+      opened.push(line === undefined ? relativePath : `${relativePath}:${String(line)}`);
     },
   };
 }
@@ -24,6 +24,13 @@ describe("candidate navigation", () => {
     const result = await openCandidateFile("src/services/checkout.ts", project, opener({ opened }));
     assert.equal(result.status, "opened");
     assert.deepEqual(opened, ["src/services/checkout.ts"]);
+  });
+
+  it("passes the excerpt line through to the editor opener", async () => {
+    const opened: string[] = [];
+    const result = await openCandidateFile("src/services/checkout.ts", project, opener({ opened }), 12);
+    assert.equal(result.status, "opened");
+    assert.deepEqual(opened, ["src/services/checkout.ts:12"]);
   });
 
   it("rejects a traversal path and does not open it", async () => {

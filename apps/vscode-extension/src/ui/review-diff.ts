@@ -73,5 +73,21 @@ export function createVscodeReviewOpener(): ReviewDiffOpener {
         return false;
       }
     },
+    async openChanges(_title, changes): Promise<boolean> {
+      try {
+        await vscode.commands.executeCommand(
+          "vscode.changes",
+          "Proposed changes",
+          changes.map((change) => [
+            toCandidateUri(change.workspaceRoot, change.relativePath),
+            toCandidateUri(change.workspaceRoot, change.relativePath),
+            vscode.Uri.parse(change.proposedUri),
+          ]),
+        );
+        return true;
+      } catch {
+        return false;
+      }
+    },
   };
 }

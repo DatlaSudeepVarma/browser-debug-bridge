@@ -5,7 +5,7 @@ import { resolveCandidatePath, type CandidateOpenRejection } from "./open-path.j
 
 export interface CandidateFileOpener {
   exists(folderRoot: string, relativePath: string): Promise<boolean>;
-  open(folderRoot: string, relativePath: string): Promise<void>;
+  open(folderRoot: string, relativePath: string, line?: number): Promise<void>;
 }
 
 export type OpenCandidateOutcome =
@@ -17,6 +17,7 @@ export async function openCandidateFile(
   relativePath: string,
   project: ProjectContext | undefined,
   opener: CandidateFileOpener,
+  line?: number,
 ): Promise<OpenCandidateOutcome> {
   if (project === undefined) {
     return {
@@ -40,6 +41,6 @@ export async function openCandidateFile(
       message: missingCandidateMessage(asPlainTreeText(resolved.resolved.relativePath)),
     };
   }
-  await opener.open(resolved.resolved.folderRoot, resolved.resolved.relativePath);
+  await opener.open(resolved.resolved.folderRoot, resolved.resolved.relativePath, line);
   return { status: "opened" };
 }

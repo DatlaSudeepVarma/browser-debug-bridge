@@ -1,12 +1,20 @@
 import type { ProposedPreviewStore, PreviewDocument } from "./preview-store.js";
 import type { PrepareFixReviewResult } from "./review-fix.js";
 
+export interface ReviewChange {
+  workspaceRoot: string;
+  relativePath: string;
+  proposedUri: string;
+  title: string;
+}
+
 export interface ReviewDiffOpener {
   openDiff(
     original: { workspaceRoot: string; relativePath: string },
     proposedUri: string,
     title: string,
   ): Promise<boolean>;
+  openChanges?(title: string, changes: readonly ReviewChange[]): Promise<boolean>;
 }
 
 export type OpenReviewResult =
@@ -20,6 +28,28 @@ export async function publishAndOpenReview(
   owner?: string,
 ): Promise<OpenReviewResult> {
   const documents = store.beginPreview(prepared.files, owner);
+  if (documents.length > 1 && opener.openChanges !== undefined) {
+    const changes: ReviewChange[] = [];
+    for (const [index, document] of documents.entries()) {
+      const file = prepared.files[index];
+      if (file === undefined) {
+        store.clear();
+        return { status: "failed", opened: 0, documents };
+      }
+      changes.push({
+        workspaceRoot: file.workspaceRoot,
+        relativePath: file.relativePath,
+        proposedUri: document.uri,
+        title: document.title,
+      });
+    }
+    const opened = await opener.openChanges("Proposed changes", changes);
+    if (!opened) {
+      store.clear();
+      return { status: "failed", opened: 0, documents };
+    }
+    return { status: "opened", documents };
+  }
   let opened = 0;
   for (const [index, document] of documents.entries()) {
     const file = prepared.files[index];

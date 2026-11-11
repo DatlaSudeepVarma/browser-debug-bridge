@@ -8,6 +8,7 @@ export interface ProposalTreeState {
   generating: boolean;
   proposal: StoredProposal | undefined;
   lastOutcome: ProposalLastOutcome;
+  reviewed: boolean;
 }
 
 export class FixProposalController {
@@ -26,6 +27,7 @@ export class FixProposalController {
       generating: this.generating,
       proposal: this.current,
       lastOutcome: this.lastOutcome,
+      reviewed: this.current !== undefined && this.reviewed === this.current,
     };
   }
 

@@ -12,11 +12,22 @@ export function createVscodeCandidateOpener(): CandidateFileOpener {
         return false;
       }
     },
-    async open(folderRoot: string, relativePath: string): Promise<void> {
+    async open(folderRoot: string, relativePath: string, line?: number): Promise<void> {
       const document = await vscode.workspace.openTextDocument(toCandidateUri(folderRoot, relativePath));
-      await vscode.window.showTextDocument(document, { preview: true });
+      await vscode.window.showTextDocument(document, {
+        preview: true,
+        selection: lineSelection(line),
+      });
     },
   };
+}
+
+function lineSelection(line: number | undefined): vscode.Range | undefined {
+  if (line === undefined || !Number.isInteger(line) || line < 1 || line > 1_000_000) {
+    return undefined;
+  }
+  const position = new vscode.Position(line - 1, 0);
+  return new vscode.Range(position, position);
 }
 
 export function toCandidateUri(folderRoot: string, relativePath: string): vscode.Uri {

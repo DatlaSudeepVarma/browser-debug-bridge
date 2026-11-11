@@ -38,6 +38,7 @@ import {
   DIAGNOSE_LATEST_SESSION_COMMAND,
   DIAGNOSE_TEST_SESSION_COMMAND,
   DIAGNOSIS_VIEW_ID,
+  HAS_DIAGNOSIS_CONTEXT,
   HAS_FIX_PROPOSAL_CONTEXT,
   OPEN_CANDIDATE_COMMAND,
   PROPOSE_FIX_COMMAND,
@@ -48,7 +49,7 @@ import {
 import { DiagnosisController } from "./ui/diagnosis-state.js";
 import { DiagnosisTreeProvider } from "./ui/diagnosis-tree-provider.js";
 import { createVscodeApplyWriter } from "./ui/apply-edit.js";
-import { DIAGNOSIS_CLEARED_MESSAGE, REVIEW_DIFF_FAILED_MESSAGE, REVIEW_OPENED_MESSAGE, applyConfirmMessage } from "./ui/messages.js";
+import { REVIEW_DIFF_FAILED_MESSAGE, REVIEW_OPENED_MESSAGE, applyConfirmDetail, applyConfirmMessage } from "./ui/messages.js";
 import {
   applyFixLogLines,
   applyFixUserNotice,
@@ -58,7 +59,9 @@ import {
   fixProposalUserNotice,
   rejectFixLogLines,
   rejectFixUserNotice,
+  type UserNotice,
 } from "./ui/notifications.js";
+import { asPlainTreeText } from "./ui/plain-text.js";
 import { openCandidateFile } from "./ui/open-candidate.js";
 import { logSafeReviewError, userFacingReviewError } from "./ui/review-errors.js";
 import { createVscodeReviewOpener, registerProposedPreviewProvider } from "./ui/review-diff.js";
@@ -118,12 +121,19 @@ function listeningAddress(): string {
   return `${BRIDGE_HOST}:${String(port)}`;
 }
 
-function showNotice(notice: { kind: "info" | "warn"; message: string }): void {
+function showNotice(channel: vscode.OutputChannel, notice: UserNotice): void {
+  if (notice.kind === "silent" || notice.message.length === 0) {
+    return;
+  }
   if (notice.kind === "info") {
     void vscode.window.showInformationMessage(notice.message);
     return;
   }
-  void vscode.window.showWarningMessage(notice.message);
+  void vscode.window.showWarningMessage(notice.message, "Show Log").then((choice) => {
+    if (choice === "Show Log") {
+      channel.show(true);
+    }
+  });
 }
 
 function reportDiagnosisOutcome(
@@ -134,9 +144,11 @@ function reportDiagnosisOutcome(
   for (const line of diagnosisLogLines(outcome)) {
     channel.appendLine(line);
   }
-  channel.show(true);
-  treeProvider.refresh();
-  showNotice(diagnosisUserNotice(outcome));
+  const notice = diagnosisUserNotice(outcome);
+  treeProvider.setActivity({
+    statusDetail: notice.kind === "warn" ? notice.message : undefined,
+  });
+  showNotice(channel, notice);
   if (outcome.status === "replaced") {
     void vscode.commands.executeCommand(`${DIAGNOSIS_VIEW_ID}.focus`);
   }
@@ -164,14 +176,19 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   const candidateOpener = createVscodeCandidateOpener();
   const reviewOpener = createVscodeReviewOpener();
   const applyWriter = createVscodeApplyWriter();
-  const syncProposalContext = (): void => {
+  const syncViewContext = (): void => {
     void vscode.commands.executeCommand(
       "setContext",
       HAS_FIX_PROPOSAL_CONTEXT,
       proposalController.getProposal() !== undefined,
     );
+    void vscode.commands.executeCommand(
+      "setContext",
+      HAS_DIAGNOSIS_CONTEXT,
+      controller.getDiagnosis() !== undefined,
+    );
   };
-  syncProposalContext();
+  syncViewContext();
 
   const startBridge = async (): Promise<void> => {
     if (bridge?.listening) {
@@ -183,6 +200,18 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   };
 
   const executeDiagnosis = async (selection: DiagnosisSelection): Promise<void> => {
+    if (proposalController.getProposal() !== undefined) {
+      const choice = await vscode.window.showWarningMessage(
+        "Diagnose again and discard the current proposal?",
+        { modal: true },
+        "Diagnose",
+      );
+      if (choice !== "Diagnose") {
+        return;
+      }
+    }
+    treeProvider.setActivity({ diagnosing: true, statusDetail: undefined });
+    try {
     await vscode.window.withProgress(
       {
         location: vscode.ProgressLocation.Notification,
@@ -212,19 +241,23 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         );
         reportDiagnosisOutcome(channel, treeProvider, outcome);
         previewStore.clear();
-        syncProposalContext();
+        syncViewContext();
       },
       );
+    } finally {
+      treeProvider.setActivity({ diagnosing: false });
+    }
   };
 
   onCapturedSession = (session) => {
-    void vscode.window
-      .showInformationMessage("Chrome debug session received.", "Diagnose")
-      .then((choice) => {
-        if (choice === "Diagnose") {
-          void executeDiagnosis({ source: "id", sessionId: session.sessionId });
-        }
-      });
+    const title = asPlainTreeText(session.page.title);
+    const message =
+      title.length > 0 ? `Chrome debug session received: ${title}` : "Chrome debug session received.";
+    void vscode.window.showInformationMessage(message, "Diagnose").then((choice) => {
+      if (choice === "Diagnose") {
+        void executeDiagnosis({ source: "id", sessionId: session.sessionId });
+      }
+    });
   };
 
   try {
@@ -321,18 +354,17 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         );
         tokenSource.dispose();
         channel.appendLine(formatProjectIntelligenceSummary(result));
-        channel.show(true);
         if (result.status === "ok") {
           void vscode.window.showInformationMessage(
             `Project intelligence complete. ${String(result.context.candidates.length)} ranked candidates.`,
           );
           return;
         }
-        if (result.status === "no-workspace") {
-          void vscode.window.showWarningMessage("Open a workspace folder before analyzing a session.");
-          return;
-        }
-        void vscode.window.showWarningMessage("Project intelligence analysis was cancelled.");
+        const analysisMessage =
+          result.status === "no-workspace"
+            ? "Open a workspace folder before analyzing a session."
+            : "Project intelligence analysis was cancelled.";
+        showNotice(channel, { kind: "warn", message: analysisMessage });
       },
     ),
     vscode.commands.registerCommand(DIAGNOSE_TEST_SESSION_COMMAND, async () => {
@@ -341,24 +373,44 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     vscode.commands.registerCommand(DIAGNOSE_LATEST_SESSION_COMMAND, async () => {
       await executeDiagnosis({ source: "captured" });
     }),
-    vscode.commands.registerCommand(REFRESH_DIAGNOSIS_COMMAND, async () => {
-      await executeDiagnosis({ source: "captured" });
+    vscode.commands.registerCommand(REFRESH_DIAGNOSIS_COMMAND, () => {
+      treeProvider.refresh();
     }),
-    vscode.commands.registerCommand(CLEAR_DIAGNOSIS_COMMAND, () => {
+    vscode.commands.registerCommand(CLEAR_DIAGNOSIS_COMMAND, async () => {
+      if (
+        controller.isRunning() ||
+        proposalController.isApplying() ||
+        proposalController.getTreeState().generating
+      ) {
+        showNotice(channel, applyFixUserNotice({ status: "busy" }));
+        return;
+      }
+      if (controller.getDiagnosis() === undefined && proposalController.getProposal() === undefined) {
+        return;
+      }
+      const choice = await vscode.window.showWarningMessage(
+        "Clear this diagnosis and any proposed change? No workspace files will be modified.",
+        { modal: true },
+        "Clear",
+      );
+      if (choice !== "Clear") {
+        return;
+      }
       const cleared = clearDiagnosisView({
         diagnosis: controller,
         proposals: proposalController,
         clearPreview: () => previewStore.clear(),
       });
       if (cleared === "busy") {
-        showNotice(applyFixUserNotice({ status: "busy" }));
+        showNotice(channel, applyFixUserNotice({ status: "busy" }));
         return;
       }
-      syncProposalContext();
-      treeProvider.refresh();
-      void vscode.window.showInformationMessage(DIAGNOSIS_CLEARED_MESSAGE);
+      treeProvider.setActivity({ statusDetail: undefined });
+      syncViewContext();
     }),
     vscode.commands.registerCommand(PROPOSE_FIX_COMMAND, async () => {
+      treeProvider.setActivity({ proposing: true, statusDetail: undefined });
+      try {
       await vscode.window.withProgress(
         {
           location: vscode.ProgressLocation.Notification,
@@ -386,13 +438,18 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
           for (const line of fixProposalLogLines(outcome)) {
             channel.appendLine(line);
           }
-          channel.show(true);
-          treeProvider.refresh();
-          syncProposalContext();
+          const notice = fixProposalUserNotice(outcome);
+          treeProvider.setActivity({
+            statusDetail: notice.kind === "warn" ? notice.message : undefined,
+          });
+          syncViewContext();
           previewStore.clear();
-          showNotice(fixProposalUserNotice(outcome));
+          showNotice(channel, notice);
         },
       );
+      } finally {
+        treeProvider.setActivity({ proposing: false });
+      }
     }),
     vscode.commands.registerCommand(REVIEW_FIX_COMMAND, async () => {
       const diagnosis = controller.getDiagnosis();
@@ -413,8 +470,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       if (prepared.status !== "ok") {
         previewStore.clear();
         channel.appendLine(logSafeReviewError(prepared.reason));
-        channel.show(true);
-        showNotice({ kind: "warn", message: userFacingReviewError(prepared.reason) });
+        treeProvider.setActivity({ statusDetail: userFacingReviewError(prepared.reason) });
+        showNotice(channel, { kind: "warn", message: userFacingReviewError(prepared.reason) });
         return;
       }
       const opened = await publishAndOpenReview(
@@ -425,28 +482,41 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       );
       if (opened.status !== "opened") {
         channel.appendLine("[Review] REVIEW_DIFF_FAILED");
-        channel.show(true);
-        void vscode.window.showWarningMessage(REVIEW_DIFF_FAILED_MESSAGE);
+        treeProvider.setActivity({ statusDetail: REVIEW_DIFF_FAILED_MESSAGE });
+        showNotice(channel, { kind: "warn", message: REVIEW_DIFF_FAILED_MESSAGE });
         return;
       }
       if (proposal !== undefined) {
         proposalController.markReviewed(proposal);
       }
+      treeProvider.setActivity({ statusDetail: undefined });
       void vscode.window.showInformationMessage(REVIEW_OPENED_MESSAGE);
     }),
-    vscode.commands.registerCommand(REJECT_FIX_COMMAND, () => {
+    vscode.commands.registerCommand(REJECT_FIX_COMMAND, async () => {
       // Arguments from TreeView items or menus are intentionally ignored; the
       // proposal to reject is always read from the live controller.
       const observed = proposalController.getProposal();
+      if (observed !== undefined && !proposalController.isApplying()) {
+        const choice = await vscode.window.showWarningMessage(
+          "Reject this proposed change? No workspace files will be modified.",
+          { modal: true },
+          "Reject",
+        );
+        if (choice !== "Reject") {
+          return;
+        }
+      }
       const outcome = rejectFixProposal(proposalController, previewStore, observed);
       for (const line of rejectFixLogLines(outcome)) {
         channel.appendLine(line);
       }
-      syncProposalContext();
+      syncViewContext();
       treeProvider.refresh();
-      showNotice(rejectFixUserNotice(outcome));
+      showNotice(channel, rejectFixUserNotice(outcome));
     }),
     vscode.commands.registerCommand(APPLY_FIX_COMMAND, async () => {
+      treeProvider.setActivity({ applying: true });
+      try {
       const outcome = await runApplyFix({
         proposalController,
         previewStore,
@@ -467,7 +537,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         confirm: async (relativePaths) => {
           const choice = await vscode.window.showWarningMessage(
             applyConfirmMessage(relativePaths),
-            { modal: true },
+            { modal: true, detail: applyConfirmDetail(relativePaths) },
             "Apply",
           );
           return choice === "Apply";
@@ -478,15 +548,20 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       for (const line of applyFixLogLines(outcome)) {
         channel.appendLine(line);
       }
-      channel.show(true);
       if (outcome.status === "applied") {
         previewStore.clear();
       }
-      syncProposalContext();
-      treeProvider.refresh();
-      showNotice(applyFixUserNotice(outcome));
+      const applyNotice = applyFixUserNotice(outcome);
+      if (applyNotice.kind === "warn") {
+        treeProvider.setActivity({ statusDetail: applyNotice.message });
+      }
+      syncViewContext();
+      showNotice(channel, applyNotice);
+      } finally {
+        treeProvider.setActivity({ applying: false });
+      }
     }),
-    vscode.commands.registerCommand(OPEN_CANDIDATE_COMMAND, async (relativePath: unknown) => {
+    vscode.commands.registerCommand(OPEN_CANDIDATE_COMMAND, async (relativePath: unknown, line: unknown) => {
       if (typeof relativePath !== "string") {
         return;
       }
@@ -494,6 +569,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         relativePath,
         controller.getDiagnosis()?.project,
         candidateOpener,
+        typeof line === "number" ? line : undefined,
       );
       if (outcome.status !== "opened") {
         void vscode.window.showWarningMessage(outcome.message);

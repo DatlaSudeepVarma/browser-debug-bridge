@@ -15,8 +15,6 @@ import {
   treeItemCommand,
   type DiagnosisTreeNode,
 } from "./diagnosis-tree.js";
-import { asPlainTreeText } from "./plain-text.js";
-
 function viewState(diagnosis: Diagnosis = FAKE_DIAGNOSIS): DiagnosisViewState {
   return {
     diagnosis,
@@ -47,10 +45,21 @@ describe("diagnosis tree construction", () => {
       "limitations",
       "proposed-fix",
     ]);
-    assert.equal(roots[0]?.label, asPlainTreeText(FAKE_DIAGNOSIS.summary));
+    assert.equal(roots[0]?.label, "Summary");
+    assert.equal(roots[0]?.expanded, true);
+    assert.equal(roots[0]?.description?.includes("checkout"), true);
     const nodes = collectTreeNodes(state);
-    assert.equal(nodes.some((node) => node.kind === "hypothesis" && node.label === "Checkout API failure"), true);
-    assert.equal(nodes.some((node) => node.kind === "evidence-ref" && node.label === "Network #0"), true);
+    assert.equal(nodes.some((node) => node.kind === "summary-text" && node.label.includes("checkout")), true);
+    assert.equal(nodes.some((node) => node.kind === "hypothesis" && node.label === "Checkout API failure" && node.expanded === true), true);
+    assert.equal(
+      nodes.some(
+        (node) =>
+          node.kind === "evidence-ref" &&
+          node.label === "Network" &&
+          node.description?.includes("HTTP 500") === true,
+      ),
+      true,
+    );
     assert.equal(nodes.some((node) => node.kind === "project-evidence"), true);
     assert.equal(
       nodes.some(
@@ -64,13 +73,15 @@ describe("diagnosis tree construction", () => {
       nodes.some((node) => node.kind === "limitation" && node.label.includes("screenshot")),
       true,
     );
-    assert.equal(
-      nodes.some(
-        (node) =>
-          node.kind === "excerpt" && node.label.includes(asPlainTreeText(FIXTURE_CHECKOUT_SERVICE.trim())),
-      ),
-      true,
+    const checkout = nodes.find(
+      (node) => node.kind === "candidate" && node.relativePath === "src/services/checkout.ts",
     );
+    assert.equal(checkout?.kind, "candidate");
+    if (checkout?.kind === "candidate") {
+      assert.equal(checkout.line, 1);
+      assert.equal(checkout.tooltip?.includes("/workspace/shop"), false);
+      assert.equal(checkout.label.includes(FIXTURE_CHECKOUT_SERVICE), false);
+    }
   });
 
   it("omits empty hypotheses, evidence, candidate, and limitation sections", () => {
@@ -105,14 +116,20 @@ describe("diagnosis tree construction", () => {
     assert.deepEqual(kinds(getChildNodes(state, hypothesis)), ["explanation"]);
   });
 
-  it("uses already captured excerpts instead of extra file reads", () => {
-    const excerpt = collectTreeNodes(viewState()).find((node) => node.kind === "excerpt");
-    assert.equal(excerpt?.kind, "excerpt");
-    if (excerpt?.kind !== "excerpt") {
+  it("opens a candidate at the captured excerpt line without copying the source into the tree", () => {
+    const candidate = collectTreeNodes(viewState()).find(
+      (node) => node.kind === "candidate" && node.relativePath === "src/services/checkout.ts",
+    );
+    assert.equal(candidate?.kind, "candidate");
+    if (candidate?.kind !== "candidate") {
       return;
     }
-    assert.equal(excerpt.label.includes("submitCheckout"), true);
-    assert.equal(excerpt.tooltip.includes("/workspace/shop"), false);
+    assert.equal(candidate.line, 1);
+    assert.equal(candidate.label.includes("submitCheckout"), false);
+    assert.equal(candidate.tooltip?.includes("/workspace/shop"), false);
+    const command = treeItemCommand(candidate);
+    assert.equal(command?.command, OPEN_CANDIDATE_COMMAND);
+    assert.deepEqual(command?.arguments, ["src/services/checkout.ts", 1]);
   });
 });
 
@@ -140,7 +157,7 @@ describe("diagnosis tree security", () => {
         assert.equal(openableRelativePath(node), undefined);
       }
     }
-    const summary = nodes.find((node) => node.kind === "summary");
+    const summary = nodes.find((node) => node.kind === "summary-text");
     assert.equal(summary?.label.includes("<script>alert(1)</script>"), true);
     const next = nodes.find((node) => node.kind === "suggested-next-step-text");
     assert.equal(next?.label, "curl http://evil.example");
@@ -160,6 +177,7 @@ describe("proposed fix tree", () => {
   it("wires the proposal-diff node to the review command without stale path arguments", () => {
     const nodes = collectTreeNodes(viewState(), {
       generating: false,
+      reviewed: false,
       lastOutcome: "none",
       proposal: {
         proposedChange: {
@@ -180,10 +198,11 @@ describe("proposed fix tree", () => {
     assert.equal(command?.command, REVIEW_FIX_COMMAND);
     assert.deepEqual(command?.arguments, []);
 
+    assert.equal(diff?.label, "Open diff");
     const proposalFile = nodes.find((node) => node.kind === "proposal-file");
     assert.equal(proposalFile?.kind, "proposal-file");
     const fileCommand = treeItemCommand(proposalFile as DiagnosisTreeNode);
-    assert.equal(fileCommand?.command, OPEN_CANDIDATE_COMMAND);
-    assert.deepEqual(fileCommand?.arguments, ["src/services/checkout.ts"]);
+    assert.equal(fileCommand?.command, REVIEW_FIX_COMMAND);
+    assert.deepEqual(fileCommand?.arguments, []);
   });
 });

@@ -141,7 +141,7 @@ The token lives in VS Code `SecretStorage` (`browserDebugBridge.pairingToken`) a
 | Browser Debug Bridge: Create Test Session | Insert a fake `DebugSessionV1` into the in-memory store |
 | Browser Debug Bridge: Analyze Test Session | Run deterministic project intelligence on the latest/fake session and print a summary |
 | Browser Debug Bridge: Diagnose Test Session | Run project intelligence, then a read-only `vscode.lm` diagnosis, and show it in the TreeView |
-| Browser Debug Bridge: Refresh Diagnosis | Re-run diagnosis against the latest stored debug session (does not create a session) |
+| Browser Debug Bridge: Refresh | Reload the Diagnosis view. It does not call the model or create a session |
 | Browser Debug Bridge: Clear Diagnosis | Drop the in-memory diagnosis and restore the TreeView empty state |
 | Browser Debug Bridge: Propose Fix | Generate an in-memory proposed change and unified diff from the current diagnosis |
 
@@ -343,11 +343,11 @@ The TreeView is a presentation layer over `DiagnosisService`. Expanding nodes do
 2. Start Browser Debug Bridge and capture or create a test session.
 3. Command Palette → **Browser Debug Bridge: Diagnose Test Session**.
 4. Confirm the **Browser Debug Bridge** activity-bar view shows Summary, Hypotheses, Suggested Next Step, Evidence, and Limitations when those fields exist.
-5. Expand a hypothesis and confirm evidence ids are human-readable (`Network #0`, not a raw payload).
-6. Click a candidate file. Confirm it opens read-only in the editor and that git status does not show a write from the extension.
-7. Command Palette → **Refresh Diagnosis**. Confirm a successful run replaces the tree; a cancelled or failed run keeps the previous tree.
-8. Command Palette → **Clear Diagnosis**. Confirm the empty state: `No diagnosis available.`
-9. If no stored session exists, Refresh should warn `No debug session available. Start a browser debugging session first.`
+5. Expand a hypothesis and confirm evidence labels are human-readable (`Network`, with the failure in the description, not a raw payload).
+6. Click a candidate file. Confirm it opens in the editor at the excerpt line and that git status does not show a write from the extension.
+7. Command Palette → **Browser Debug Bridge: Refresh**. Confirm the view reloads and the model is not called.
+8. Command Palette → **Clear Diagnosis**. Confirm the warning, then the empty state with a Diagnose Latest Session action.
+9. If no stored session exists, **Diagnose Latest Session** warns `No debug session available. Start a browser debugging session first.`
 
 Unit tests under `apps/vscode-extension/src/ui/` cover controller state, tree construction, empty-section omission, candidate path jail, missing files, transactional replacement, AI error mapping, and plain-text labels. They do not import `vscode`.
 
@@ -431,7 +431,7 @@ Do not commit `.env`, pairing tokens, or `*.vsix` artifacts.
 | Fix context insufficient | Diagnosis candidates have no bounded excerpts. |
 | Proposed change too large / invalid diff | Size or hunk validation failed; nothing is written. |
 | Cancellation | In-flight AI work dropped; success is not stored. |
-| Missing debug session | Capture or **Create Test Session** first. Refresh Diagnosis does not invent a session. |
+| Missing debug session | Capture or **Create Test Session** first. Refresh does not invent a session. |
 
 User notifications never include stack traces, pairing tokens, prompts, source excerpts, or raw model text. Those details also stay out of the Output channel except for provider id, counts, and error codes.
 

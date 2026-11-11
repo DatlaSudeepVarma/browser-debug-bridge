@@ -9,3 +9,4 @@ export const REVIEW_FIX_COMMAND = "browserDebugBridge.reviewFix";
 export const REJECT_FIX_COMMAND = "browserDebugBridge.rejectFix";
 export const APPLY_FIX_COMMAND = "browserDebugBridge.applyFix";
 export const HAS_FIX_PROPOSAL_CONTEXT = "browserDebugBridge.hasFixProposal";
+export const HAS_DIAGNOSIS_CONTEXT = "browserDebugBridge.hasDiagnosis";

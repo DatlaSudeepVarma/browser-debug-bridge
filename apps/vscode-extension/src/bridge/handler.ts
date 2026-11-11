@@ -8,6 +8,7 @@ import {
   SessionSubmissionSchema,
   UuidSchema,
   createProtocolError,
+  isSyntheticDebugSession,
   type DebugSessionV1,
   type ProtocolError,
   type ProtocolErrorCode,
@@ -17,7 +18,7 @@ import { isJpegBytes, readBearerToken, sha256Hex, timingSafeEqualText } from "./
 import type { BridgeLogger } from "./logger.js";
 import { RequestReplayCache } from "./replay-cache.js";
 import type { ScreenshotStore } from "./screenshot-store.js";
-import type { SessionStore } from "./session-store.js";
+import type { SessionOrigin, SessionStore } from "./session-store.js";
 
 export interface BridgeHandlerOptions {
   extensionVersion: string;
@@ -26,6 +27,7 @@ export interface BridgeHandlerOptions {
   store: SessionStore;
   screenshots: ScreenshotStore;
   logger: BridgeLogger;
+  onCapturedSession?: (session: DebugSessionV1) => void;
   maxBodyBytes?: number;
   bodyWarnBytes?: number;
 }
@@ -475,13 +477,17 @@ export function createBridgeHandler(options: BridgeHandlerOptions): {
         return;
       }
     }
-    const evicted = options.store.add(session);
+    const origin: SessionOrigin = isSyntheticDebugSession(session) ? "synthetic" : "captured";
+    const evicted = options.store.add(session, Date.now(), origin);
     for (const evictedId of evicted) {
       options.screenshots.delete(evictedId);
     }
     options.screenshots.bind(session.sessionId);
     replayCache.remember(parsed.data.requestId, session.sessionId);
     options.logger.info(`Session received: ${session.sessionId}`);
+    if (origin === "captured") {
+      options.onCapturedSession?.(session);
+    }
     sendJson(
       req,
       res,

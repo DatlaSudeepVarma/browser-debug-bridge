@@ -1,57 +1,75 @@
 import * as vscode from "vscode";
+import {
+  commitApplyPlan,
+  restoreApplyPlan,
+  type ApplyDocumentBatch,
+  type ApplyTextDocument,
+} from "../fix/apply-documents.js";
 import type { WorkspaceFileWriter, WorkspaceWriteResult } from "../fix/run-apply.js";
 import type { SafeApplyPlan } from "../fix/types.js";
 import { toCandidateUri } from "./vscode-open.js";
 
+interface VscodeApplyDocument extends ApplyTextDocument {
+  readonly textDocument: vscode.TextDocument;
+}
+
 /**
  * The only workspace write path. One WorkspaceEdit covers every planned file.
  * Nothing is written if any target is dirty or its buffer disagrees with the
- * plan. applyEdit false means no change was made. A failed save is reported
- * and is not rolled back.
+ * plan. A failed save rolls the already-saved files back to currentContent.
+ * restore() puts a finished write back when the bytes on disk do not match.
  */
 export function createVscodeApplyWriter(): WorkspaceFileWriter {
+  const batch = createVscodeBatch();
   return {
-    async write(plan: SafeApplyPlan): Promise<WorkspaceWriteResult> {
-      const edit = new vscode.WorkspaceEdit();
-      const documents: vscode.TextDocument[] = [];
-      for (const file of plan.files) {
-        let document: vscode.TextDocument;
-        try {
-          document = await vscode.workspace.openTextDocument(
-            toCandidateUri(file.workspaceRoot, file.relativePath),
-          );
-        } catch {
-          return { status: "not-applied" };
-        }
-        if (document.isDirty) {
-          return { status: "dirty" };
-        }
-        if (document.getText() !== file.currentContent) {
-          return { status: "mismatch" };
-        }
-        const end = document.lineAt(Math.max(document.lineCount - 1, 0)).range.end;
-        edit.replace(document.uri, new vscode.Range(new vscode.Position(0, 0), end), file.proposedContent);
-        documents.push(document);
-      }
-      let applied = false;
+    write(plan: SafeApplyPlan): Promise<WorkspaceWriteResult> {
+      return commitApplyPlan(plan, batch);
+    },
+    restore(plan: SafeApplyPlan): Promise<"restored" | "unrestored"> {
+      return restoreApplyPlan(plan, batch);
+    },
+  };
+}
+
+function createVscodeBatch(): ApplyDocumentBatch<VscodeApplyDocument> {
+  return {
+    async open(file): Promise<VscodeApplyDocument | undefined> {
       try {
-        applied = await vscode.workspace.applyEdit(edit);
+        const textDocument = await vscode.workspace.openTextDocument(
+          toCandidateUri(file.workspaceRoot, file.relativePath),
+        );
+        return {
+          textDocument,
+          get isDirty(): boolean {
+            return textDocument.isDirty;
+          },
+          getText(): string {
+            return textDocument.getText();
+          },
+          save(): Promise<boolean> {
+            return Promise.resolve(textDocument.save());
+          },
+        };
       } catch {
-        return { status: "not-applied" };
+        return undefined;
       }
-      if (!applied) {
-        return { status: "not-applied" };
+    },
+    async replaceAll(entries): Promise<boolean> {
+      const edit = new vscode.WorkspaceEdit();
+      for (const entry of entries) {
+        const document = entry.document.textDocument;
+        const end = document.lineAt(Math.max(document.lineCount - 1, 0)).range.end;
+        edit.replace(
+          document.uri,
+          new vscode.Range(new vscode.Position(0, 0), end),
+          entry.next,
+        );
       }
-      for (const document of documents) {
-        try {
-          if ((await document.save()) !== true) {
-            return { status: "unsaved" };
-          }
-        } catch {
-          return { status: "unsaved" };
-        }
+      try {
+        return (await vscode.workspace.applyEdit(edit)) === true;
+      } catch {
+        return false;
       }
-      return { status: "applied" };
     },
   };
 }

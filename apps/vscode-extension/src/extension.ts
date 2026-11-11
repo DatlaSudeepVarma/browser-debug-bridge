@@ -1,7 +1,11 @@
 import path from "node:path";
 import * as vscode from "vscode";
 import { inspectWorkspacePath } from "@browser-debug-bridge/redaction";
-import { createFakeDebugSessionV1, PAIRING_TOKEN_PATTERN } from "@browser-debug-bridge/schema";
+import {
+  createFakeDebugSessionV1,
+  PAIRING_TOKEN_PATTERN,
+  type DebugSessionV1,
+} from "@browser-debug-bridge/schema";
 import {
   BRIDGE_HOST,
   BRIDGE_PORT,
@@ -31,6 +35,7 @@ import type { StoredProposal } from "./fix/types.js";
 import {
   APPLY_FIX_COMMAND,
   CLEAR_DIAGNOSIS_COMMAND,
+  DIAGNOSE_LATEST_SESSION_COMMAND,
   DIAGNOSE_TEST_SESSION_COMMAND,
   DIAGNOSIS_VIEW_ID,
   HAS_FIX_PROPOSAL_CONTEXT,
@@ -61,6 +66,12 @@ import { runDiagnosis, type DiagnosisRunOutcome } from "./ui/run-diagnosis.js";
 import { createVscodeCandidateOpener } from "./ui/vscode-open.js";
 
 let bridge: BridgeServer | undefined;
+let onCapturedSession: ((session: DebugSessionV1) => void) | undefined;
+
+type DiagnosisSelection =
+  | { source: "captured" }
+  | { source: "synthetic"; allowCreate: boolean }
+  | { source: "id"; sessionId: string };
 
 function createLogger(channel: vscode.OutputChannel): BridgeLogger {
   return {
@@ -102,6 +113,7 @@ async function createBridge(
     expectedChromeExtensionId: configuredChromeExtensionId(),
     pairingToken,
     logger,
+    onCapturedSession: (session) => onCapturedSession?.(session),
   });
 }
 
@@ -174,16 +186,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     await bridge.start();
   };
 
-  try {
-    await startBridge();
-  } catch {
-    logger.warn("Server failed to start");
-    void vscode.window.showErrorMessage(
-      "Browser Debug Bridge could not start the local bridge. Check that 127.0.0.1:17321 is available.",
-    );
-  }
-
-  const executeDiagnosis = async (allowCreateSession: boolean): Promise<void> => {
+  const executeDiagnosis = async (selection: DiagnosisSelection): Promise<void> => {
     await vscode.window.withProgress(
       {
         location: vscode.ProgressLocation.Notification,
@@ -195,7 +198,18 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         const outcome = await runDiagnosis(
           controller,
           {
-            getLatestSession: () => bridge?.latestSession(),
+            getLatestSession: () => {
+              if (bridge === undefined) {
+                return undefined;
+              }
+              if (selection.source === "id") {
+                return bridge.getSession(selection.sessionId);
+              }
+              if (selection.source === "synthetic") {
+                return bridge.latestSyntheticSession();
+              }
+              return bridge.latestCapturedSession();
+            },
             createSessionIfMissing: () =>
               bridge?.listening === true ? bridge.createTestSession() : createFakeDebugSessionV1(),
             analyze: (session, analyzeToken) => {
@@ -205,15 +219,37 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
             diagnose: (session, project, diagnoseToken) =>
               new DiagnosisService(new VscodeLmProvider()).diagnose(session, project, diagnoseToken),
           },
-          { allowCreateSession, proposalController },
+          {
+            allowCreateSession: selection.source === "synthetic" && selection.allowCreate,
+            proposalController,
+          },
           token,
         );
         reportDiagnosisOutcome(channel, treeProvider, outcome);
         previewStore.clear();
         syncProposalContext();
       },
-    );
+      );
   };
+
+  onCapturedSession = (session) => {
+    void vscode.window
+      .showInformationMessage("Chrome debug session received.", "Diagnose")
+      .then((choice) => {
+        if (choice === "Diagnose") {
+          void executeDiagnosis({ source: "id", sessionId: session.sessionId });
+        }
+      });
+  };
+
+  try {
+    await startBridge();
+  } catch {
+    logger.warn("Server failed to start");
+    void vscode.window.showErrorMessage(
+      "Browser Debug Bridge could not start the local bridge. Check that 127.0.0.1:17321 is available.",
+    );
+  }
 
   context.subscriptions.push(
     vscode.commands.registerCommand("browserDebugBridge.hello", () => {
@@ -284,9 +320,13 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     vscode.commands.registerCommand(
       "browserDebugBridge.analyzeTestSession",
       async () => {
-        const session =
-          bridge?.latestSession() ??
-          (bridge?.listening === true ? bridge.createTestSession() : createFakeDebugSessionV1());
+        const session = bridge?.latestCapturedSession() ?? bridge?.latestSyntheticSession();
+        if (session === undefined) {
+          void vscode.window.showWarningMessage(
+            "No debug session available. Start a browser debugging session first.",
+          );
+          return;
+        }
         const tokenSource = new vscode.CancellationTokenSource();
         const access = createVscodeWorkspaceAccess(tokenSource.token);
         const service = new ProjectIntelligenceService(access);
@@ -311,10 +351,13 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       },
     ),
     vscode.commands.registerCommand(DIAGNOSE_TEST_SESSION_COMMAND, async () => {
-      await executeDiagnosis(true);
+      await executeDiagnosis({ source: "synthetic", allowCreate: true });
+    }),
+    vscode.commands.registerCommand(DIAGNOSE_LATEST_SESSION_COMMAND, async () => {
+      await executeDiagnosis({ source: "captured" });
     }),
     vscode.commands.registerCommand(REFRESH_DIAGNOSIS_COMMAND, async () => {
-      await executeDiagnosis(false);
+      await executeDiagnosis({ source: "captured" });
     }),
     vscode.commands.registerCommand(CLEAR_DIAGNOSIS_COMMAND, () => {
       if (proposalController.isApplying()) {
@@ -436,6 +479,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
           return choice === "Apply";
         },
         write: (plan) => applyWriter.write(plan),
+        restore: (plan) => applyWriter.restore(plan),
       });
       for (const line of applyFixLogLines(outcome)) {
         channel.appendLine(line);
@@ -515,6 +559,7 @@ function dirtyProposedPaths(proposal: StoredProposal | undefined): Set<string> {
 }
 
 export async function deactivate(): Promise<void> {
+  onCapturedSession = undefined;
   await bridge?.stop();
   bridge = undefined;
 }

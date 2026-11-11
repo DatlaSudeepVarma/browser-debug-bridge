@@ -54,6 +54,7 @@ export {
 export {
   createFakeDebugSessionV1,
   createFakeSessionSubmission,
+  isSyntheticDebugSession,
 } from "./fake-session.js";
 
 export {

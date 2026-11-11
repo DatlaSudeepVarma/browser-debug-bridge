@@ -3,6 +3,7 @@ import { describe, it } from "node:test";
 import {
   createFakeDebugSessionV1,
   createFakeSessionSubmission,
+  isSyntheticDebugSession,
   parseDebugSession,
 } from "./index.js";
 
@@ -11,6 +12,14 @@ describe("fake debug session helpers", () => {
     const session = createFakeDebugSessionV1();
     assert.equal(session.schemaVersion, 1);
     assert.equal(parseDebugSession(session).sessionId, session.sessionId);
+    assert.equal(isSyntheticDebugSession(session), true);
+    assert.equal(
+      isSyntheticDebugSession({
+        ...session,
+        browser: { ...session.browser, version: "120.0.0" },
+      }),
+      false,
+    );
   });
 
   it("wraps a fake session in a valid protocol submission", () => {

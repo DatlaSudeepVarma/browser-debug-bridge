@@ -78,6 +78,10 @@ function plan(
   });
 }
 
+function trustedBaseline(content: string): { trustedFullFileHashes: Record<string, string> } {
+  return { trustedFullFileHashes: { [CHECKOUT]: sha256Utf8(content) } };
+}
+
 function withFirstChange(
   proposal: StoredProposal,
   mutate: (change: ProposedFileChange) => ProposedFileChange,
@@ -96,7 +100,7 @@ function withFirstChange(
 describe("write-free apply planner", () => {
   it("produces the correct full-file after-image for a valid proposal", async () => {
     const proposal = await validProposal();
-    const result = plan(proposal, { [CHECKOUT]: FAKE_CHECKOUT_SOURCE });
+    const result = plan(proposal, { [CHECKOUT]: FAKE_CHECKOUT_SOURCE }, trustedBaseline(FAKE_CHECKOUT_SOURCE));
     assert.equal(result.status, "ok");
     if (result.status !== "ok") {
       return;
@@ -111,7 +115,7 @@ describe("write-free apply planner", () => {
   it("preserves live lines outside the edited excerpt", async () => {
     const proposal = await validProposal();
     const live = `${FAKE_CHECKOUT_SOURCE}${EXTENDED_TAIL}`;
-    const result = plan(proposal, { [CHECKOUT]: live });
+    const result = plan(proposal, { [CHECKOUT]: live }, trustedBaseline(live));
     assert.equal(result.status, "ok");
     if (result.status !== "ok") {
       return;
@@ -124,7 +128,7 @@ describe("write-free apply planner", () => {
   it("computes a SHA-256 of the complete current UTF-8 file, not the excerpt digest", async () => {
     const proposal = await validProposal();
     const live = `${FAKE_CHECKOUT_SOURCE}${EXTENDED_TAIL}`;
-    const result = plan(proposal, { [CHECKOUT]: live });
+    const result = plan(proposal, { [CHECKOUT]: live }, trustedBaseline(live));
     assert.equal(result.status, "ok");
     if (result.status !== "ok") {
       return;
@@ -174,15 +178,29 @@ describe("write-free apply planner", () => {
     assert.equal(result.reason.code, "APPLY_SOURCE_CHANGED");
   });
 
-  it("still plans when outside-excerpt lines changed but no full-file baseline exists", async () => {
+  it("refuses an outside-excerpt change when no full-file baseline exists", async () => {
     const proposal = await validProposal();
     const changedOutside = `${FAKE_CHECKOUT_SOURCE}${EXTENDED_TAIL}`.replace("return 1;", "return 2;");
     const result = plan(proposal, { [CHECKOUT]: changedOutside });
-    assert.equal(result.status, "ok");
-    if (result.status !== "ok") {
+    assert.equal(result.status, "refused");
+    if (result.status !== "refused") {
       return;
     }
-    assert.equal(result.plan.files[0]?.proposedContent.includes("return 2;"), true);
+    assert.equal(result.reason.code, "APPLY_BASELINE_MISSING");
+  });
+
+  it("refuses a stored diff that no longer matches the proposed edits", async () => {
+    const proposal = await validProposal();
+    const tampered: StoredProposal = {
+      ...proposal,
+      diff: { ...proposal.diff, text: `${proposal.diff.text}\n+tampered\n` },
+    };
+    const result = plan(tampered, { [CHECKOUT]: FAKE_CHECKOUT_SOURCE }, trustedBaseline(FAKE_CHECKOUT_SOURCE));
+    assert.equal(result.status, "refused");
+    if (result.status !== "refused") {
+      return;
+    }
+    assert.equal(result.reason.code, "APPLY_DIFF_MISMATCH");
   });
 
   it("refuses path traversal and sensitive files", async () => {
@@ -385,7 +403,7 @@ describe("write-free apply planner", () => {
   it("does not invoke filesystem writes or VS Code mutation APIs", async () => {
     const proposal = await validProposal();
     const reads: string[] = [];
-    const result = plan(proposal, { [CHECKOUT]: FAKE_CHECKOUT_SOURCE }, { reads });
+    const result = plan(proposal, { [CHECKOUT]: FAKE_CHECKOUT_SOURCE }, { reads, ...trustedBaseline(FAKE_CHECKOUT_SOURCE) });
     assert.equal(result.status, "ok");
     assert.deepEqual(reads, [CHECKOUT]);
 

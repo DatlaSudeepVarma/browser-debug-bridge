@@ -269,6 +269,27 @@ describe("explicit apply", () => {
     assert.equal(mismatch.controller.getProposal(), proposal);
   });
 
+  it("restores previous contents when the saved bytes do not match the plan", async () => {
+    const proposal = await validProposal();
+    let restored = 0;
+    const { input } = harness({
+      proposal,
+      write: async () => ({ status: "applied" }),
+    });
+    input.restore = async () => {
+      restored += 1;
+      return "restored";
+    };
+    const outcome = await runApplyFix(input);
+    assert.equal(outcome.status, "write-failed");
+    if (outcome.status === "write-failed") {
+      assert.equal(outcome.detail, "verify");
+      assert.equal(outcome.restored, true);
+    }
+    assert.equal(restored, 1);
+    assert.equal(applyFixUserNotice(outcome).message.includes("restored"), true);
+  });
+
   it("does not write when the file changes after confirmation", async () => {
     const proposal = await validProposal();
     let reads = 0;

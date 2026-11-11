@@ -23,6 +23,7 @@ export interface BridgeServerOptions {
   bodyWarnBytes?: number;
   maxSessions?: number;
   logger?: BridgeLogger;
+  onCapturedSession?: (session: DebugSessionV1) => void;
 }
 
 export class BridgeServer {
@@ -67,6 +68,14 @@ export class BridgeServer {
     return this.store.latest()?.session;
   }
 
+  public latestCapturedSession(): DebugSessionV1 | undefined {
+    return this.store.latest("captured")?.session;
+  }
+
+  public latestSyntheticSession(): DebugSessionV1 | undefined {
+    return this.store.latest("synthetic")?.session;
+  }
+
   public sessionCount(): number {
     return this.store.size;
   }
@@ -81,7 +90,7 @@ export class BridgeServer {
 
   public createTestSession(): DebugSessionV1 {
     const session = createFakeDebugSessionV1();
-    this.store.add(session);
+    this.store.add(session, Date.now(), "synthetic");
     this.logger.info(`Session received: ${session.sessionId}`);
     return session;
   }
@@ -98,6 +107,7 @@ export class BridgeServer {
       store: this.store,
       screenshots: this.screenshots,
       logger: this.logger,
+      onCapturedSession: this.options.onCapturedSession,
       maxBodyBytes: this.options.maxBodyBytes,
       bodyWarnBytes: this.options.bodyWarnBytes,
     });

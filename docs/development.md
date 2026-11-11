@@ -353,7 +353,7 @@ Unit tests under `apps/vscode-extension/src/ui/` cover controller state, tree co
 
 ### Phase 9 in-memory proposed fix
 
-Phase 9 generates a proposed code change and validated unified diff entirely in memory. It does not modify workspace files.
+Phase 9 generates a proposed code change and a validated unified diff in memory. **Propose Fix** does not modify workspace files. **Apply Proposed Fix** is a later, confirmed write.
 
 The command uses the current diagnosis only. It does not recapture Chrome, create a session, or run diagnosis automatically.
 
@@ -392,7 +392,7 @@ Not covered automatically (requires Chrome + Extension Development Host):
 - Pairing through the Chrome popup and VS Code SecretStorage UI
 - `vscode.lm` live diagnosis
 - TreeView click-to-open in the real editor
-- Apply / Reject / native diff (those commands do not exist)
+- The VS Code `WorkspaceEdit` adapter in the Extension Development Host (the save/rollback decisions are unit-tested without `vscode`)
 
 Do not claim an end-to-end browser/VS Code walkthrough passed if only `pnpm test` was run.
 

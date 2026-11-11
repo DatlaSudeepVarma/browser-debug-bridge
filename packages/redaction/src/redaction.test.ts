@@ -64,6 +64,23 @@ describe("URL redaction", () => {
     );
   });
 
+  it("redacts a token in a URL fragment and a secret under a neutral query name", () => {
+    const fragment = redactUrl(`https://localhost:3000/callback#${FAKE_JWT}`);
+    assert.equal(fragment.includes(FAKE_JWT), false);
+    assert.match(fragment, /#\[REDACTED\]/);
+
+    const named = redactUrl("https://localhost:3000/account#token");
+    assert.equal(named.includes("#token"), false);
+    assert.match(named, /#\[REDACTED\]/);
+
+    const neutral = redactUrl("https://localhost:3000/account?session=plain-secret-value");
+    assert.equal(neutral.includes("plain-secret-value"), false);
+    assert.match(neutral, /session=\[REDACTED\]/);
+
+    const route = redactUrl("https://localhost:3000/account#checkout");
+    assert.equal(route, "https://localhost:3000/account#checkout");
+  });
+
   it("handles URL parsing failures without returning the original input", () => {
     const original = "http://[broken";
     assert.equal(redactUrl(original), UNPARSEABLE_URL_PLACEHOLDER);
@@ -80,6 +97,12 @@ describe("sensitive text", () => {
     const redacted = redactSensitiveText(`header ${FAKE_JWT} footer`);
     assert.equal(redacted.includes(FAKE_JWT), false);
     assert.equal(redacted, `header ${REDACTED_PLACEHOLDER} footer`);
+  });
+
+  it("redacts bearer tokens inside text", () => {
+    const redacted = redactSensitiveText("Authorization: Bearer abcdefghijklmnop");
+    assert.equal(redacted.includes("abcdefghijklmnop"), false);
+    assert.match(redacted, /Bearer \[REDACTED\]/);
   });
 });
 

@@ -444,7 +444,9 @@ export function createBridgeHandler(options: BridgeHandlerOptions): {
       );
       return;
     }
-    if (replay === "idempotent" && existing !== undefined) {
+    // A repeated body, or a requestId already accepted, does not refresh receivedAt.
+    if (replay === "idempotent" || existing !== undefined) {
+      replayCache.remember(parsed.data.requestId, session.sessionId);
       sendJson(
         req,
         res,

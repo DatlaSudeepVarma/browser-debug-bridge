@@ -20,13 +20,14 @@ describe("RequestReplayCache", () => {
     assert.equal(cache.check("aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeee1", "session-b"), "conflict");
   });
 
-  it("evicts the oldest request ids when the bound is exceeded", () => {
-    const cache = new RequestReplayCache(2);
+  it("keeps the oldest request id after many newer ids", () => {
+    const cache = new RequestReplayCache();
     cache.remember("id-1", "s1");
-    cache.remember("id-2", "s2");
-    cache.remember("id-3", "s3");
-    assert.equal(cache.size, 2);
-    assert.equal(cache.check("id-1", "s1"), "fresh");
-    assert.equal(cache.check("id-3", "s3"), "idempotent");
+    for (let index = 0; index < 200; index += 1) {
+      cache.remember(`id-${String(index + 2)}`, `s${String(index + 2)}`);
+    }
+    assert.equal(cache.check("id-1", "s1"), "idempotent");
+    assert.equal(cache.check("id-1", "other"), "conflict");
+    assert.equal(cache.size, 201);
   });
 });

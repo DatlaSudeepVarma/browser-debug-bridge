@@ -12,7 +12,11 @@ export interface ApplyTextDocument {
 }
 
 export interface ApplyDocumentBatch<T extends ApplyTextDocument = ApplyTextDocument> {
-  open(file: { workspaceRoot: string; relativePath: string }): Promise<T | undefined>;
+  open(file: {
+    workspaceRoot: string;
+    relativePath: string;
+    canonicalPath?: string;
+  }): Promise<T | undefined>;
   /**
    * Replace every listed document in one step. False means none of the
    * replacements were applied.
@@ -113,7 +117,7 @@ export async function restoreApplyPlan<T extends ApplyTextDocument>(
 
 async function openDocument<T extends ApplyTextDocument>(
   batch: ApplyDocumentBatch<T>,
-  file: { workspaceRoot: string; relativePath: string },
+  file: { workspaceRoot: string; relativePath: string; canonicalPath?: string },
 ): Promise<T | undefined> {
   try {
     return await batch.open(file);

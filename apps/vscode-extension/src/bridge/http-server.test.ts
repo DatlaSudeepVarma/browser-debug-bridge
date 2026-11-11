@@ -81,6 +81,18 @@ describe("SessionStore", () => {
     assert.equal(store.size, 0);
   });
 
+  it("does not refresh receivedAt when the same session id is added again", () => {
+    const store = new SessionStore(4);
+    const older = createFakeSessionSubmission().session;
+    const newer = createFakeSessionSubmission().session;
+    store.add(older, 10, "captured");
+    store.add(newer, 20, "captured");
+    store.add(older, 99, "synthetic");
+    assert.equal(store.get(older.sessionId)?.receivedAt, 10);
+    assert.equal(store.get(older.sessionId)?.origin, "captured");
+    assert.equal(store.latest()?.session.sessionId, newer.sessionId);
+  });
+
   it("keeps a synthetic session from hiding a captured session", () => {
     const store = new SessionStore(4);
     const captured = createFakeSessionSubmission().session;
@@ -374,6 +386,48 @@ describe("BridgeServer HTTP", () => {
     assert.equal(response.status, 400);
     assert.equal((await parseError(response)).code, "INVALID_SESSION");
     assert.equal(server.getSession(first.session.sessionId)?.userDescription, first.session.userDescription);
+  });
+
+  it("does not make an older session latest when the same body is submitted again", async () => {
+    const server = await running();
+    const older = createFakeSessionSubmission();
+    const newer = createFakeSessionSubmission();
+    const headers = {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${TOKEN}`,
+    };
+    assert.equal(
+      (
+        await fetch(`${baseUrl(server)}/sessions`, {
+          method: "POST",
+          headers,
+          body: JSON.stringify(older),
+        })
+      ).status,
+      200,
+    );
+    assert.equal(
+      (
+        await fetch(`${baseUrl(server)}/sessions`, {
+          method: "POST",
+          headers,
+          body: JSON.stringify(newer),
+        })
+      ).status,
+      200,
+    );
+    const replay = {
+      ...older,
+      requestId: "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+    };
+    const response = await fetch(`${baseUrl(server)}/sessions`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify(replay),
+    });
+    assert.equal(response.status, 200);
+    assert.equal(server.sessionCount(), 2);
+    assert.equal(server.latestSession()?.sessionId, newer.session.sessionId);
   });
 
   it("treats an identical session replay as idempotent", async () => {

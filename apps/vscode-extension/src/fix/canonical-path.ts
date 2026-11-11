@@ -94,3 +94,32 @@ export function inspectCanonicalWorkspaceTarget(
 
   return { status: "ok", canonicalPath: current };
 }
+
+export function canonicalPathsEqual(
+  left: string,
+  right: string,
+  io: CanonicalPathIo = nodeCanonicalIo,
+): boolean {
+  return normalizeComparable(left, io) === normalizeComparable(right, io);
+}
+
+/**
+ * Resolves the target again and accepts it only when it is still the path
+ * recorded on the apply plan. The caller opens the returned real path.
+ */
+export function recheckApplyCanonicalPath(
+  file: { workspaceRoot: string; relativePath: string; canonicalPath: string },
+  io: CanonicalPathIo = nodeCanonicalIo,
+): { status: "ok"; canonicalPath: string } | { status: "rejected" } {
+  if (file.canonicalPath.length === 0) {
+    return { status: "rejected" };
+  }
+  const inspected = inspectCanonicalWorkspaceTarget(file.workspaceRoot, file.relativePath, io);
+  if (inspected.status !== "ok") {
+    return { status: "rejected" };
+  }
+  if (!canonicalPathsEqual(inspected.canonicalPath, file.canonicalPath, io)) {
+    return { status: "rejected" };
+  }
+  return { status: "ok", canonicalPath: inspected.canonicalPath };
+}

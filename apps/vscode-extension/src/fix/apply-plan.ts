@@ -290,10 +290,24 @@ function planSafeApplyUnchecked(input: PlanSafeApplyInput): ApplyPlanResult {
         relativePath: lexical.relativePath,
       });
     }
+    const canonical = inspectCanonicalWorkspaceTarget(
+      workspaceRoot,
+      lexical.relativePath,
+      input.canonicalIo,
+    );
+    if (canonical.status !== "ok") {
+      return refuse(
+        "APPLY_CANONICAL_REJECTED",
+        "Canonical path validation could not prove the target stays inside the workspace.",
+        { relativePath: lexical.relativePath },
+      );
+    }
+
     const proposedContent = joinLines(proposedLines, text.newline, text.trailingNewline);
     files.push({
       relativePath: lexical.relativePath,
       workspaceRoot,
+      canonicalPath: canonical.canonicalPath,
       currentContent,
       currentContentHash,
       proposedContent,

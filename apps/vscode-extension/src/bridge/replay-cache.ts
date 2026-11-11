@@ -1,11 +1,11 @@
-const DEFAULT_MAX_REQUEST_IDS = 128;
-
 export type ReplayCheck = "fresh" | "idempotent" | "conflict";
 
+/**
+ * Remembers every requestId for the life of the bridge process.
+ * Older ids are not dropped, so a reused id cannot become fresh again.
+ */
 export class RequestReplayCache {
   private readonly seen = new Map<string, string>();
-
-  public constructor(private readonly maxEntries: number = DEFAULT_MAX_REQUEST_IDS) {}
 
   public check(requestId: string, sessionId: string): ReplayCheck {
     const existing = this.seen.get(requestId);
@@ -17,16 +17,9 @@ export class RequestReplayCache {
 
   public remember(requestId: string, sessionId: string): void {
     if (this.seen.has(requestId)) {
-      this.seen.delete(requestId);
+      return;
     }
     this.seen.set(requestId, sessionId);
-    while (this.seen.size > this.maxEntries) {
-      const oldest = this.seen.keys().next().value;
-      if (oldest === undefined) {
-        break;
-      }
-      this.seen.delete(oldest);
-    }
   }
 
   public clear(): void {

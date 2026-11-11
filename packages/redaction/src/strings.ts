@@ -9,6 +9,8 @@ const JWT_PATTERN =
 const JWT_IN_TEXT_PATTERN =
   /eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/g;
 
+const BEARER_IN_TEXT_PATTERN = /\bBearer\s+[A-Za-z0-9._~+/-]{8,}/gi;
+
 const SENSITIVE_NAME_TOKENS = new Set([
   ...SENSITIVE_QUERY_PARAMETER_NAMES,
   "passwd",
@@ -44,5 +46,5 @@ export function redactSensitiveText(value: string): string {
     return REDACTED_PLACEHOLDER;
   }
 
-  return redactJwtLikeValues(value);
+  return redactJwtLikeValues(value).replace(BEARER_IN_TEXT_PATTERN, `Bearer ${REDACTED_PLACEHOLDER}`);
 }

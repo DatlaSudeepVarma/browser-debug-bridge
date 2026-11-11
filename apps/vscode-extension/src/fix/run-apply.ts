@@ -43,7 +43,7 @@ export interface RunApplyFixInput {
   readLiveFiles: (proposal: StoredProposal) => Promise<Record<string, string | undefined>>;
   dirtyPaths: (proposal: StoredProposal) => Set<string> | Promise<Set<string>>;
   canonicalIo: CanonicalPathIo;
-  confirm: (fileCount: number) => Promise<boolean>;
+  confirm: (relativePaths: readonly string[]) => Promise<boolean>;
   write: WorkspaceFileWriter["write"];
   restore?: (plan: SafeApplyPlan) => Promise<"restored" | "unrestored">;
 }
@@ -67,8 +67,17 @@ export async function runApplyFix(input: RunApplyFixInput): Promise<ApplyFixOutc
     if (planned.status !== "ok") {
       return { status: "refused", reason: planned.reason };
     }
+    if (!input.proposalController.hasReviewed(proposal)) {
+      return {
+        status: "refused",
+        reason: {
+          code: "APPLY_NOT_REVIEWED",
+          message: "Review the proposed change before applying it.",
+        },
+      };
+    }
 
-    const confirmed = await input.confirm(planned.files.length);
+    const confirmed = await input.confirm(planned.files.map((file) => file.relativePath));
     if (!confirmed) {
       return { status: "declined" };
     }
@@ -89,6 +98,7 @@ export async function runApplyFix(input: RunApplyFixInput): Promise<ApplyFixOutc
       files: replanned.files.map((file) => ({
         relativePath: file.relativePath,
         workspaceRoot: file.workspaceRoot,
+        canonicalPath: file.canonicalPath,
         currentContent: file.currentContent,
         currentContentHash: sha256Utf8(file.currentContent),
         proposedContent: file.proposedContent,

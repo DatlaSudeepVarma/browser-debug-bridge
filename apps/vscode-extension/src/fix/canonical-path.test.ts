@@ -6,6 +6,7 @@ import { describe, it } from "node:test";
 import {
   inspectCanonicalWorkspaceTarget,
   isInsideCanonicalRoot,
+  recheckApplyCanonicalPath,
   type CanonicalPathIo,
 } from "./canonical-path.js";
 
@@ -53,6 +54,49 @@ describe("canonical workspace path", () => {
       },
     });
     const result = inspectCanonicalWorkspaceTarget("/workspace", "src/ok.ts", io);
+    assert.equal(result.status, "ok");
+    if (result.status === "ok") {
+      assert.equal(result.canonicalPath, "/workspace/src/ok.ts");
+    }
+  });
+
+  it("rejects a write target whose real path changed after planning", () => {
+    const io = memoryIo({
+      exists: ["/workspace", "/workspace/src", "/workspace/src/ok.ts"],
+      realpath: {
+        "/workspace": "/workspace",
+        "/workspace/src": "/workspace/src",
+        "/workspace/src/ok.ts": "/workspace/src/other.ts",
+      },
+    });
+    const result = recheckApplyCanonicalPath(
+      {
+        workspaceRoot: "/workspace",
+        relativePath: "src/ok.ts",
+        canonicalPath: "/workspace/src/ok.ts",
+      },
+      io,
+    );
+    assert.equal(result.status, "rejected");
+  });
+
+  it("accepts a write target that still resolves to the planned path", () => {
+    const io = memoryIo({
+      exists: ["/workspace", "/workspace/src", "/workspace/src/ok.ts"],
+      realpath: {
+        "/workspace": "/workspace",
+        "/workspace/src": "/workspace/src",
+        "/workspace/src/ok.ts": "/workspace/src/ok.ts",
+      },
+    });
+    const result = recheckApplyCanonicalPath(
+      {
+        workspaceRoot: "/workspace",
+        relativePath: "src/ok.ts",
+        canonicalPath: "/workspace/src/ok.ts",
+      },
+      io,
+    );
     assert.equal(result.status, "ok");
     if (result.status === "ok") {
       assert.equal(result.canonicalPath, "/workspace/src/ok.ts");

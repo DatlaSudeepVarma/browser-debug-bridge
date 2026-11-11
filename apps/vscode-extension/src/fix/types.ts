@@ -92,6 +92,7 @@ export interface ApplyPlanRefusal {
 export interface SafeApplyFilePlan {
   relativePath: string;
   workspaceRoot: string;
+  canonicalPath: string;
   currentContent: string;
   currentContentHash: string;
   proposedContent: string;

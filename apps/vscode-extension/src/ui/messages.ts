@@ -55,6 +55,9 @@ export const APPLY_BUSY_MESSAGE = "Apply is already running, or another diagnosi
 
 export const APPLY_NO_PROPOSAL_MESSAGE = "There is no proposed change to apply.";
 
+export const APPLY_NOT_REVIEWED_MESSAGE =
+  "Review the proposed change before applying it. No workspace files were modified.";
+
 export const APPLY_STALE_MESSAGE =
   "The proposed change or diagnosis changed before it could be applied. No workspace files were modified.";
 
@@ -77,9 +80,12 @@ export function applyUnrestoredMessage(relativePaths: readonly string[]): string
   return `The proposed change could not be finished, and these files could not be restored: ${listed}. Check them before editing further.`;
 }
 
-export function applyConfirmMessage(fileCount: number): string {
-  const files = fileCount === 1 ? "1 file" : `${String(fileCount)} files`;
-  return `Apply this proposed change to ${files}? The current workspace contents will be overwritten and saved.`;
+export function applyConfirmMessage(relativePaths: readonly string[]): string {
+  const names = relativePaths.slice(0, 8);
+  const listed = names.join(", ");
+  const extra =
+    relativePaths.length > names.length ? `, and ${String(relativePaths.length - names.length)} more` : "";
+  return `Apply this proposed change to ${listed}${extra}? The current workspace contents will be overwritten and saved.`;
 }
 
 export function missingCandidateMessage(relativePath: string): string {

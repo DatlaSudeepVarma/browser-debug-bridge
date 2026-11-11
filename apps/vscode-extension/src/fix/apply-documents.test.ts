@@ -42,6 +42,7 @@ function planFor(files: { path: string; current: string; next: string }[]): Safe
       (file): SafeApplyFilePlan => ({
         relativePath: file.path,
         workspaceRoot: "/workspace/shop",
+        canonicalPath: `/workspace/shop/${file.path}`,
         currentContent: file.current,
         currentContentHash: "c".repeat(64),
         proposedContent: file.next,

@@ -442,6 +442,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         void vscode.window.showWarningMessage(REVIEW_DIFF_FAILED_MESSAGE);
         return;
       }
+      if (proposal !== undefined) {
+        proposalController.markReviewed(proposal);
+      }
       void vscode.window.showInformationMessage(REVIEW_OPENED_MESSAGE);
     }),
     vscode.commands.registerCommand(REJECT_FIX_COMMAND, () => {
@@ -474,8 +477,12 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
           );
         },
         dirtyPaths: (proposal) => dirtyProposedPaths(proposal),
-        confirm: async (fileCount) => {
-          const choice = await vscode.window.showWarningMessage(applyConfirmMessage(fileCount), { modal: true }, "Apply");
+        confirm: async (relativePaths) => {
+          const choice = await vscode.window.showWarningMessage(
+            applyConfirmMessage(relativePaths),
+            { modal: true },
+            "Apply",
+          );
           return choice === "Apply";
         },
         write: (plan) => applyWriter.write(plan),

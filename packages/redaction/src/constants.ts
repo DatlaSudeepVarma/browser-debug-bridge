@@ -18,5 +18,32 @@ export const SENSITIVE_QUERY_PARAMETER_NAMES = [
   "code",
 ] as const;
 
+/**
+ * Query names whose values may stay visible. Every other query value is
+ * redacted, including values that do not look like a JWT.
+ */
+export const PUBLIC_QUERY_PARAMETER_NAMES = [
+  "id",
+  "q",
+  "query",
+  "search",
+  "state",
+  "page",
+  "limit",
+  "offset",
+  "sort",
+  "order",
+  "tab",
+  "view",
+  "lang",
+  "locale",
+  "ref",
+  "utm_source",
+  "utm_medium",
+  "utm_campaign",
+  "utm_content",
+  "utm_term",
+] as const;
+
 export type SensitiveQueryParameterName =
   (typeof SENSITIVE_QUERY_PARAMETER_NAMES)[number];

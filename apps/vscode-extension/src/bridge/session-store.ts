@@ -20,7 +20,7 @@ export class SessionStore {
     origin: SessionOrigin = "captured",
   ): string[] {
     if (this.sessions.has(session.sessionId)) {
-      this.sessions.delete(session.sessionId);
+      return [];
     }
     this.sessions.set(session.sessionId, { session, receivedAt, origin });
     const evicted: string[] = [];

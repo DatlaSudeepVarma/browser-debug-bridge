@@ -12,6 +12,7 @@ export interface ProposalTreeState {
 
 export class FixProposalController {
   private current: StoredProposal | undefined;
+  private reviewed: StoredProposal | undefined;
   private generating = false;
   private applying = false;
   private lastOutcome: ProposalLastOutcome = "none";
@@ -30,7 +31,21 @@ export class FixProposalController {
 
   public clear(): void {
     this.current = undefined;
+    this.reviewed = undefined;
     this.lastOutcome = "none";
+  }
+
+  /** Records that Review opened this exact proposal. A replacement must be reviewed again. */
+  public markReviewed(proposal: StoredProposal): boolean {
+    if (this.current !== proposal) {
+      return false;
+    }
+    this.reviewed = proposal;
+    return true;
+  }
+
+  public hasReviewed(proposal: StoredProposal): boolean {
+    return this.current === proposal && this.reviewed === proposal;
   }
 
   public isApplying(): boolean {
@@ -67,12 +82,14 @@ export class FixProposalController {
       return false;
     }
     this.current = undefined;
+    this.reviewed = undefined;
     this.lastOutcome = "applied";
     return true;
   }
 
   public applySuccess(proposal: StoredProposal): void {
     this.current = proposal;
+    this.reviewed = undefined;
     this.lastOutcome = "none";
   }
 
@@ -100,6 +117,7 @@ export class FixProposalController {
       return "stale";
     }
     this.current = undefined;
+    this.reviewed = undefined;
     this.lastOutcome = "rejected";
     return "rejected";
   }

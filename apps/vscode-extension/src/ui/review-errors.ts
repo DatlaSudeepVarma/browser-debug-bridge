@@ -1,5 +1,6 @@
 import type { ReviewFixRefusal, ReviewFixRefusalCode } from "../fix/review-fix.js";
 import {
+  APPLY_NOT_REVIEWED_MESSAGE,
   REVIEW_DIFF_FAILED_MESSAGE,
   REVIEW_NO_DIAGNOSIS_MESSAGE,
   REVIEW_NO_PROPOSAL_MESSAGE,
@@ -23,6 +24,7 @@ const MESSAGES: Record<ReviewFixRefusalCode, string> = {
   REVIEW_NO_DIAGNOSIS: REVIEW_NO_DIAGNOSIS_MESSAGE,
   REVIEW_SOURCE_DIRTY: REVIEW_SOURCE_DIRTY_MESSAGE,
   REVIEW_DIFF_FAILED: REVIEW_DIFF_FAILED_MESSAGE,
+  APPLY_NOT_REVIEWED: APPLY_NOT_REVIEWED_MESSAGE,
 };
 
 export function userFacingReviewError(reason: ReviewFixRefusal): string {

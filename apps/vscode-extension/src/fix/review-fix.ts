@@ -8,7 +8,8 @@ export type ReviewFixRefusalCode =
   | ApplyPlanErrorCode
   | "REVIEW_NO_DIAGNOSIS"
   | "REVIEW_SOURCE_DIRTY"
-  | "REVIEW_DIFF_FAILED";
+  | "REVIEW_DIFF_FAILED"
+  | "APPLY_NOT_REVIEWED";
 
 export interface ReviewFixRefusal {
   code: ReviewFixRefusalCode;
@@ -19,6 +20,7 @@ export interface ReviewFixRefusal {
 export interface ReviewFixFile {
   relativePath: string;
   workspaceRoot: string;
+  canonicalPath: string;
   currentContent: string;
   proposedContent: string;
   title: string;
@@ -89,6 +91,7 @@ export function prepareFixReview(input: PrepareFixReviewInput): PrepareFixReview
     files: planned.plan.files.map((file) => ({
       relativePath: file.relativePath,
       workspaceRoot: file.workspaceRoot,
+      canonicalPath: file.canonicalPath,
       currentContent: file.currentContent,
       proposedContent: file.proposedContent,
       title: `${posixBasename(file.relativePath)} (Proposed change)`,

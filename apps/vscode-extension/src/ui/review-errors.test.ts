@@ -20,6 +20,7 @@ const CODES: ReviewFixRefusalCode[] = [
   "REVIEW_NO_DIAGNOSIS",
   "REVIEW_SOURCE_DIRTY",
   "REVIEW_DIFF_FAILED",
+  "APPLY_NOT_REVIEWED",
 ];
 
 describe("review error mapping", () => {

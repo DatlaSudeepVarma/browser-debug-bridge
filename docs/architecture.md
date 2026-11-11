@@ -115,7 +115,7 @@ Security is a product constraint, not a later add-on:
 - Least privilege: Chrome permissions are storage, `activeTab`, `scripting`, and the existing loopback host permission. `debugger`, `webRequest`, `cookies`, `tabs`, and `<all_urls>` are not requested.
 - Redaction before sharing: URLs, DOM, secrets, and sensitive fields are stripped in `@browser-debug-bridge/redaction` before a session is submitted.
 - Patch path protection: generated fixes must not silently touch protected paths.
-- Human approval: Apply writes only after a modal confirmation. Reject drops the in-memory proposal and does not write. A failed save restores files that were already saved.
+- Human approval: Apply writes only after Review has been opened for that proposal and a modal confirmation that names the files. Reject drops the in-memory proposal and does not write. A failed save restores files that were already saved.
 
 Phase 5A added cropped screenshot capture. Phase 5B added session-scoped console capture. Phase 5C added session-scoped network failure metadata. Phase 6 added deterministic project intelligence. Phase 7 adds read-only AI diagnosis. Phase 8 adds a read-only diagnosis TreeView. Phase 9 adds in-memory unified diffs. Phase 11 hardens integration and security around that pipeline. Review, Reject, and Apply are now implemented on top of it.
 
@@ -421,9 +421,11 @@ Apply does all of the following before it writes:
 3. Confirm the proposal still belongs to the current diagnosis and session
 4. Regenerate the unified diff and refuse when `diff.text` no longer matches the edits
 5. Resolve canonical paths (symlink, jail, allowlist, sensitive-file checks)
-6. Submit one `WorkspaceEdit` for every planned file
-7. Report success only when `applyEdit` returns true, every save returns true, and a post-write read matches the planned bytes
-8. Do not retry a failed write automatically
+6. Require that Review was opened for this proposal, then confirm with the relative paths named
+7. Resolve each canonical path again and open that real path. A path that moved is refused
+8. Submit one `WorkspaceEdit` for every planned file
+9. Report success only when `applyEdit` returns true, every save returns true, and a post-write read matches the planned bytes
+10. Do not retry a failed write automatically
 
 If a later save fails, files that were already saved are written back to their pre-apply contents. If the post-write hash does not match, Apply restores those contents. If that restore fails, the warning names the relative paths. Multi-file `WorkspaceEdit` is still not an atomic disk transaction: a crash during save can leave a subset of files updated.
 
@@ -439,7 +441,7 @@ A proposal with no full-file baseline is refused. The excerpt digest alone is no
 - `Host` must be `127.0.0.1` or `127.0.0.1:<1-65535>`. Values such as `127.0.0.1:17321@evil` are rejected.
 - JSON bodies are capped at 5 MB; JPEG screenshot bodies at 1 MB and must start with JPEG magic bytes.
 - At most 20 sessions and 20 screenshot artifacts are retained. Shutdown clears both stores.
-- `requestId` values are cached (bounded). Reusing a `requestId` for a **different** `sessionId` is rejected. Identical retries are idempotent.
+- `requestId` values are remembered for the life of the bridge process. Reusing a `requestId` for a **different** `sessionId` is rejected. An identical body for an existing `sessionId` is acknowledged and does not refresh `receivedAt`.
 - Submitting a **different** payload under an existing `sessionId` is rejected. The previous session is kept.
 
 Replay protection is **not** a timestamp/nonce scheme. The original protocol has no nonce field; adding one would break Chrome without a schema change. The `requestId` cache is the compatible control. A local process that already possesses the pairing token can still submit new sessions. That is accepted for V1 loopback pairing.
@@ -482,7 +484,7 @@ Completed and cancelled operations must not retain screenshot bytes after bridge
 
 ### Known redaction limitations
 
-Redaction is heuristic. It will miss secrets that do not look like JWTs, named query parameters, or the small sensitive-field list. Screenshots are never OCR'd. Console stacks may still contain file paths. Do not claim perfect secret detection.
+Redaction is heuristic. Query values stay visible only for a small set of routing names such as `id`, `q`, and `page`. Other query values, token-like URL fragments, JWTs, and `Bearer` tokens in text are redacted. Secrets that match none of those shapes can still remain in DOM text or console messages. Screenshots are never OCR'd. Console stacks may still contain file paths. Do not claim perfect secret detection.
 
 ### Maintainer security checklist
 
@@ -492,7 +494,7 @@ Redaction is heuristic. It will miss secrets that do not look like JWTs, named q
 - [ ] Bearer comparison remains timing-safe; pairing token never logged
 - [ ] Origin policy not weakened to make tests pass
 - [ ] Candidate allowlist and source-hash validation not bypassed
-- [ ] Apply remains the only `WorkspaceEdit` path, and it still re-checks the full-file hash, stored diff, canonical path, and confirmation before writing
+- [ ] Apply remains the only `WorkspaceEdit` path. It still requires Review, names the files in the confirmation, and re-checks the full-file hash, stored diff, and canonical path. The write opens the real path from that last check
 - [ ] No new AI SDKs, cloud endpoints, or telemetry
 - [ ] Schema/protocol changes ship with compatibility tests
 - [ ] Future Apply changes must keep the canonical path check and the stale-source re-read

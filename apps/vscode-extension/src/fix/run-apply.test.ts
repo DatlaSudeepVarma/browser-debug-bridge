@@ -43,7 +43,8 @@ function harness(options?: {
   proposal?: StoredProposal;
   files?: Record<string, string | undefined>;
   dirty?: Set<string>;
-  confirm?: (fileCount: number) => Promise<boolean>;
+  reviewed?: boolean;
+  confirm?: (relativePaths: readonly string[]) => Promise<boolean>;
   write?: (plan: SafeApplyPlan) => Promise<WorkspaceWriteResult>;
   diagnosis?: ReturnType<typeof fixtureDiagnosisState> | undefined;
   diagnosisRunning?: boolean;
@@ -52,6 +53,9 @@ function harness(options?: {
   const controller = new FixProposalController();
   if (options?.proposal !== undefined) {
     controller.applySuccess(options.proposal);
+    if (options.reviewed !== false) {
+      controller.markReviewed(options.proposal);
+    }
   }
   const files = { ...(options?.files ?? { [CHECKOUT]: FAKE_CHECKOUT_SOURCE }) };
   const store = new ProposedPreviewStore(() => "apply-preview");
@@ -106,6 +110,7 @@ describe("explicit apply", () => {
         {
           relativePath: CHECKOUT,
           workspaceRoot: "/workspace/shop",
+          canonicalPath: "/workspace/shop/src/services/checkout.ts",
           currentContent: FAKE_CHECKOUT_SOURCE,
           proposedContent: EXPECTED_AFTER,
           title: "checkout.ts (Proposed change)",
@@ -123,6 +128,7 @@ describe("explicit apply", () => {
     }
     assert.equal(calls.length, 1);
     assert.equal(calls[0]?.files[0]?.relativePath, CHECKOUT);
+    assert.equal(calls[0]?.files[0]?.canonicalPath, "/workspace/shop/src/services/checkout.ts");
     assert.equal(calls[0]?.files[0]?.currentContent, FAKE_CHECKOUT_SOURCE);
     assert.equal(calls[0]?.files[0]?.proposedContent, EXPECTED_AFTER);
     assert.equal(files[CHECKOUT], EXPECTED_AFTER);
@@ -439,9 +445,31 @@ describe("explicit apply", () => {
     assert.equal(controller.getTreeState().lastOutcome, "none");
   });
 
-  it("does not put source text in the confirm prompt and does not write from the planner module", () => {
-    const message = applyConfirmMessage(2);
-    assert.equal(message.includes("2 files"), true);
+  it("refuses apply until the current proposal has been reviewed", async () => {
+    const proposal = await validProposal();
+    let confirmed = false;
+    const { calls, input } = harness({
+      proposal,
+      reviewed: false,
+      confirm: async () => {
+        confirmed = true;
+        return true;
+      },
+    });
+    const outcome = await runApplyFix(input);
+    assert.equal(outcome.status, "refused");
+    if (outcome.status === "refused") {
+      assert.equal(outcome.reason.code, "APPLY_NOT_REVIEWED");
+    }
+    assert.equal(confirmed, false);
+    assert.equal(calls.length, 0);
+    assert.match(applyFixUserNotice(outcome).message, /Review/);
+  });
+
+  it("names the files in the confirm prompt and does not write from the planner module", () => {
+    const message = applyConfirmMessage(["src/a.ts", "src/b.ts"]);
+    assert.equal(message.includes("src/a.ts"), true);
+    assert.equal(message.includes("src/b.ts"), true);
     assert.equal(message.includes(FAKE_CHECKOUT_SOURCE), false);
     assert.equal(message.includes("fetch("), false);
     const root = path.dirname(fileURLToPath(import.meta.url));
@@ -451,6 +479,8 @@ describe("explicit apply", () => {
     assert.equal(/\bwriteFile(?:Sync)?\b/.test(runner), false);
     const adapter = readFileSync(path.join(root, "../ui/apply-edit.ts"), "utf8");
     assert.equal(adapter.includes("workspace.applyEdit"), true);
+    assert.equal(adapter.includes("recheckApplyCanonicalPath"), true);
+    assert.equal(adapter.includes("Uri.file"), true);
     assert.equal(/fs\.writeFile/.test(adapter), false);
     assert.equal(/\bWorkspaceEdit\b/.test(adapter), true);
     const extension = readFileSync(path.join(root, "../extension.ts"), "utf8");

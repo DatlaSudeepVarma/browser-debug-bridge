@@ -33,6 +33,18 @@ describe("fix proposal state", () => {
     assert.equal(controller.getTreeState().lastOutcome, "none");
   });
 
+  it("requires review again after a proposal is replaced", async () => {
+    const controller = new FixProposalController();
+    const proposal = await successfulProposal();
+    controller.applySuccess(proposal);
+    assert.equal(controller.markReviewed(proposal), true);
+    assert.equal(controller.hasReviewed(proposal), true);
+    const replacement = await successfulProposal();
+    controller.applySuccess(replacement);
+    assert.equal(controller.hasReviewed(proposal), false);
+    assert.equal(controller.hasReviewed(replacement), false);
+  });
+
   it("stores a successful proposal", async () => {
     const controller = new FixProposalController();
     const outcome = await runFixProposal(

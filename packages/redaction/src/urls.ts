@@ -1,15 +1,54 @@
 import {
+  PUBLIC_QUERY_PARAMETER_NAMES,
   REDACTED_DATA_URL,
   REDACTED_JAVASCRIPT_URL,
   REDACTED_PLACEHOLDER,
   UNPARSEABLE_URL_PLACEHOLDER,
 } from "./constants.js";
-import { isJwtLike, isSensitiveFieldName } from "./strings.js";
+import { isJwtLike, isSensitiveFieldName, redactSensitiveText } from "./strings.js";
 
 const SCHEME_PATTERN = /^[a-zA-Z][a-zA-Z+\-.]*:/;
+const OPAQUE_SECRET_PATTERN = /^[A-Za-z0-9._~+/-]{16,}$/;
+const PUBLIC_QUERY_NAMES = new Set<string>(PUBLIC_QUERY_PARAMETER_NAMES);
 
 function shouldRedactQueryPair(name: string, value: string): boolean {
-  return isSensitiveFieldName(name) || isJwtLike(value);
+  if (isSensitiveFieldName(name) || isJwtLike(value) || redactSensitiveText(value) !== value) {
+    return true;
+  }
+  return !PUBLIC_QUERY_NAMES.has(name.trim().toLowerCase());
+}
+
+function looksLikeOpaqueSecret(value: string): boolean {
+  const trimmed = value.trim();
+  if (!OPAQUE_SECRET_PATTERN.test(trimmed)) {
+    return false;
+  }
+  if (/^[a-z0-9]+(?:-[a-z0-9]+)*$/i.test(trimmed) && trimmed.length < 24) {
+    return false;
+  }
+  return true;
+}
+
+function redactHashBody(raw: string): string {
+  if (!raw.includes("=")) {
+    if (isSensitiveFieldName(raw) || isJwtLike(raw) || looksLikeOpaqueSecret(raw)) {
+      return REDACTED_PLACEHOLDER;
+    }
+    return redactSensitiveText(raw);
+  }
+  return redactParameterList(raw);
+}
+
+function redactParameterList(raw: string): string {
+  const params = new URLSearchParams(raw);
+  const parts: string[] = [];
+  for (const [key, value] of params.entries()) {
+    const redacted = shouldRedactQueryPair(key, value);
+    parts.push(
+      `${encodeURIComponent(key)}=${redacted ? REDACTED_PLACEHOLDER : encodeURIComponent(value)}`,
+    );
+  }
+  return parts.join("&");
 }
 
 function redactQueryString(query: string): string {
@@ -24,21 +63,11 @@ function redactQueryString(query: string): string {
     return query;
   }
 
-  if (prefix === "#" && !raw.includes("=")) {
-    return query;
+  if (prefix === "#") {
+    return `#${redactHashBody(raw)}`;
   }
 
-  const params = new URLSearchParams(raw);
-  const parts: string[] = [];
-
-  for (const [key, value] of params.entries()) {
-    const redacted = shouldRedactQueryPair(key, value);
-    parts.push(
-      `${encodeURIComponent(key)}=${redacted ? REDACTED_PLACEHOLDER : encodeURIComponent(value)}`,
-    );
-  }
-
-  return `${prefix}${parts.join("&")}`;
+  return `${prefix}${redactParameterList(raw)}`;
 }
 
 function serializeUrl(url: URL): string {

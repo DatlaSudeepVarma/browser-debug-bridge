@@ -120,6 +120,37 @@ describe("BridgeServer HTTP", () => {
     return server;
   }
 
+  it("reports unpaired status, then paired after the token matches", async () => {
+    const server = await running();
+    const before = await fetch(`${baseUrl(server)}/pair-status`);
+    assert.equal(before.status, 200);
+    assert.equal(((await before.json()) as { paired: boolean }).paired, false);
+    const mismatch = await fetch(`${baseUrl(server)}/pair`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        protocolVersion: PROTOCOL_VERSION,
+        type: "pair.token",
+        token: "a".repeat(64),
+      }),
+    });
+    assert.equal(mismatch.status, 401);
+    assert.equal((await parseError(mismatch)).code, "UNAUTHORIZED");
+    const paired = await fetch(`${baseUrl(server)}/pair`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        protocolVersion: PROTOCOL_VERSION,
+        type: "pair.token",
+        token: TOKEN,
+      }),
+    });
+    assert.equal(paired.status, 200);
+    assert.equal(((await paired.json()) as { paired: boolean }).paired, true);
+    const after = await fetch(`${baseUrl(server)}/pair-status`);
+    assert.equal(((await after.json()) as { paired: boolean; state: string }).state, "paired");
+  });
+
   it("GET /health returns 200 and protocolVersion 1", async () => {
     const server = await running();
     const response = await fetch(`${baseUrl(server)}/health`);

@@ -80,6 +80,17 @@ describe("SessionStore", () => {
     store.clear();
     assert.equal(store.size, 0);
   });
+
+  it("keeps a synthetic session from hiding a captured session", () => {
+    const store = new SessionStore(4);
+    const captured = createFakeSessionSubmission().session;
+    const synthetic = createFakeSessionSubmission().session;
+    store.add(captured, 1, "captured");
+    store.add(synthetic, 2, "synthetic");
+    assert.equal(store.latest("captured")?.session.sessionId, captured.sessionId);
+    assert.equal(store.latest("synthetic")?.session.sessionId, synthetic.sessionId);
+    assert.equal(store.latest()?.session.sessionId, synthetic.sessionId);
+  });
 });
 
 describe("BridgeServer HTTP", () => {
@@ -205,6 +216,42 @@ describe("BridgeServer HTTP", () => {
     assert.equal(ack.accepted, true);
     assert.equal(ack.sessionId, submission.session.sessionId);
     assert.ok(server.getSession(submission.session.sessionId));
+    assert.equal(server.latestCapturedSession(), undefined);
+    assert.equal(server.latestSyntheticSession()?.sessionId, submission.session.sessionId);
+  });
+
+  it("notifies only for a captured session", async () => {
+    const received: string[] = [];
+    const server = await running({
+      onCapturedSession: (session) => {
+        received.push(session.sessionId);
+      },
+    });
+    const synthetic = createFakeSessionSubmission();
+    const captured = createFakeSessionSubmission();
+    captured.session = parseDebugSession({
+      ...captured.session,
+      browser: { ...captured.session.browser, version: "120.0.0" },
+    });
+    const headers = {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${TOKEN}`,
+      Origin: ORIGIN,
+    };
+    const syntheticResponse = await fetch(`${baseUrl(server)}/sessions`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify(synthetic),
+    });
+    const capturedResponse = await fetch(`${baseUrl(server)}/sessions`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify(captured),
+    });
+    assert.equal(syntheticResponse.status, 200);
+    assert.equal(capturedResponse.status, 200);
+    assert.deepEqual(received, [captured.session.sessionId]);
+    assert.equal(server.latestCapturedSession()?.sessionId, captured.session.sessionId);
   });
 
   it("enforces the stored session limit over HTTP", async () => {

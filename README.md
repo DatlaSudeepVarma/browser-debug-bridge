@@ -31,9 +31,9 @@ AI Fix Proposal
         ↓
 Validated Unified Diff
         ↓
-Native VS Code Diff        (not implemented)
+Native VS Code Diff
         ↓
-Explicit Apply / Reject    (not implemented)
+Explicit Apply / Reject
         ↓
 Validated workspace modification
         ↓
@@ -44,15 +44,14 @@ No cloud backend is part of V1. Session metadata stays on the developer's machin
 
 ## Current development status
 
-This repository is in **early development (Phase 11)**. Phases 1–9 are implemented. Phase 10 (native VS Code diff UI, explicit Apply/Reject, and workspace writes) was **not implemented**. Phase 11 audited the existing tree, hardened security and state races, and added integration tests.
+Phases 1–9 and the Apply/Reject review path are implemented. A captured Chrome session is stored on the local bridge and can be diagnosed with **Diagnose Latest Session**. **Diagnose Test Session** creates a synthetic session and does not replace a captured one.
+
+Apply writes through one `WorkspaceEdit` after a second safety plan and an explicit confirmation. A failed save rolls back files that were already saved. A post-write hash mismatch restores the previous contents.
 
 The following are **not implemented**:
 
-- Native VS Code diff UI
-- Apply / Reject commands
-- Any `WorkspaceEdit` / `writeFile` path
 - WebSocket events
-- Screenshot bytes sent to a multimodal model
+- Screenshot bytes sent to a multimodal model, or shown in the Diagnosis view
 - Marketplace publication
 
 Do not treat this tree as production-ready. See [docs/architecture.md](docs/architecture.md) for the security checklist and remaining risks.
@@ -123,7 +122,7 @@ Full commands, pairing, packaging, and manual checks are in [docs/development.md
 - Native VS Code TreeView (`browserDebugBridge.diagnosis`)
 - In-memory proposed change + validated unified diff, candidate-allowlisted and size-bounded
 
-**Generating a diagnosis, proposal, or unified diff does not modify workspace files.** There is no Apply path in this tree.
+**Generating a diagnosis or a proposal does not modify workspace files.** Apply is a separate command. It writes only after confirmation, and only when the full-file hash and the stored diff still match the proposal.
 
 ## Security and privacy boundaries
 

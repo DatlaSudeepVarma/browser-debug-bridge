@@ -17,7 +17,9 @@ import {
   APPLY_STALE_MESSAGE,
   APPLY_UNSAVED_MESSAGE,
   APPLY_VERIFY_FAILED_MESSAGE,
+  APPLY_VERIFY_RESTORED_MESSAGE,
   APPLY_WRITE_FAILED_MESSAGE,
+  applyUnrestoredMessage,
   FIX_REJECTED_MESSAGE,
   FIX_STALE_MESSAGE,
   NO_DIAGNOSIS_FOR_FIX_MESSAGE,
@@ -184,8 +186,14 @@ export function applyFixUserNotice(outcome: ApplyFixOutcome): UserNotice {
       if (outcome.detail === "unsaved") {
         return { kind: "warn", message: APPLY_UNSAVED_MESSAGE };
       }
+      if (outcome.detail === "unrestored") {
+        return { kind: "warn", message: applyUnrestoredMessage(outcome.relativePaths ?? []) };
+      }
       if (outcome.detail === "verify") {
-        return { kind: "warn", message: APPLY_VERIFY_FAILED_MESSAGE };
+        return {
+          kind: "warn",
+          message: outcome.restored === true ? APPLY_VERIFY_RESTORED_MESSAGE : APPLY_VERIFY_FAILED_MESSAGE,
+        };
       }
       return { kind: "warn", message: APPLY_WRITE_FAILED_MESSAGE };
   }

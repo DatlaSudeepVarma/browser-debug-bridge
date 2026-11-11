@@ -18,6 +18,8 @@ const MESSAGES: Record<ReviewFixRefusalCode, string> = {
   APPLY_EDIT_INVALID: "The proposed edits are not valid for the current file.",
   APPLY_PROPOSAL_MALFORMED: "The proposed change is not valid to review.",
   APPLY_TEXT_AMBIGUOUS: "The source file has unsupported encoding or ambiguous line endings.",
+  APPLY_DIFF_MISMATCH: "The stored diff does not match the proposed edits.",
+  APPLY_BASELINE_MISSING: "The proposal has no trusted full-file baseline, so it cannot be applied.",
   REVIEW_NO_DIAGNOSIS: REVIEW_NO_DIAGNOSIS_MESSAGE,
   REVIEW_SOURCE_DIRTY: REVIEW_SOURCE_DIRTY_MESSAGE,
   REVIEW_DIFF_FAILED: REVIEW_DIFF_FAILED_MESSAGE,

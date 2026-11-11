@@ -48,7 +48,7 @@ DebugSessionV1 contains only screenshot **metadata** (`mime`, `width`, `height`,
 
 `apps/vscode-extension` is a VS Code extension using the official Extension API.
 
-Its job is to receive a debug session, inspect the open project, present a diagnosis, and propose a code fix in memory. Native Apply/Reject is not implemented in this tree.
+Its job is to receive a debug session, inspect the open project, present a diagnosis, propose a code fix, and apply that fix only after an explicit confirmation.
 
 Phase 1 established the extension foundation and a Hello smoke-test command. Phase 3 starts a loopback HTTP bridge inside the extension process, stores pairing tokens in SecretStorage, and keeps recent DebugSession payloads in memory. Phase 6 adds a deterministic, local **project intelligence** subsystem that turns a DebugSession plus the open workspace into a bounded `ProjectContext`. Phase 7 sends that pair to a read-only AI provider abstraction (`vscode.lm` first). Phase 8 presents the validated `Diagnosis` in a native TreeView. Phase 9 turns that diagnosis into an in-memory proposed change and unified diff. Phase 11 audited that pipeline and hardened authentication, path, and state-consistency controls. It does not modify files. Native diff review and Apply/Reject were specified after Phase 9 and are **not present** in this tree.
 
@@ -115,9 +115,9 @@ Security is a product constraint, not a later add-on:
 - Least privilege: Chrome permissions are storage, `activeTab`, `scripting`, and the existing loopback host permission. `debugger`, `webRequest`, `cookies`, `tabs`, and `<all_urls>` are not requested.
 - Redaction before sharing: URLs, DOM, secrets, and sensitive fields are stripped in `@browser-debug-bridge/redaction` before a session is submitted.
 - Patch path protection: generated fixes must not silently touch protected paths.
-- Human approval: diagnosis may propose a fix. This tree has **no Apply path**; a developer cannot currently write that proposal through the extension.
+- Human approval: Apply writes only after a modal confirmation. Reject drops the in-memory proposal and does not write. A failed save restores files that were already saved.
 
-Phase 5A added cropped screenshot capture. Phase 5B added session-scoped console capture. Phase 5C added session-scoped network failure metadata. Phase 6 added deterministic project intelligence. Phase 7 adds read-only AI diagnosis. Phase 8 adds a read-only diagnosis TreeView. Phase 9 adds in-memory unified diffs. Phase 11 hardens integration and security around that existing V1 surface. Applying those diffs remains unimplemented.
+Phase 5A added cropped screenshot capture. Phase 5B added session-scoped console capture. Phase 5C added session-scoped network failure metadata. Phase 6 added deterministic project intelligence. Phase 7 adds read-only AI diagnosis. Phase 8 adds a read-only diagnosis TreeView. Phase 9 adds in-memory unified diffs. Phase 11 hardens integration and security around that pipeline. Review, Reject, and Apply are now implemented on top of it.
 
 ## 8. Phase 4–5C capture details
 
@@ -402,13 +402,34 @@ The extension hashes the bounded excerpt representation itself (`originalContent
 
 **Phase 9 generates a proposed code change and validated unified diff entirely in memory. It does not modify workspace files.**
 
-## 13. Phase 11 — integration, hardening, and remaining Apply gap
+## 13. Phase 11 and the Apply path
 
-Phase 11 did not add Apply, Reject, native diffs, agents, cloud services, or new providers. It verified the implemented pipeline:
+Phase 11 verified this pipeline and closed defects in it:
 
 `capture → DebugSessionV1 → loopback bridge → Project Intelligence → DiagnosisService → TreeView → FixProposalService → in-memory unified diff`
 
-and closed demonstrated defects in that pipeline.
+Review, Reject, and Apply were added after that audit.
+
+### Apply / Reject
+
+`browserDebugBridge.reviewFix` opens a native diff of the planned full file. `browserDebugBridge.rejectFix` drops the in-memory proposal and its virtual preview. `browserDebugBridge.applyFix` is the only `WorkspaceEdit` path.
+
+Apply does all of the following before it writes:
+
+1. Re-read the target through the workspace file API
+2. Compare the current full-file SHA-256 with `liveFileHashes` (or an explicit trusted baseline)
+3. Confirm the proposal still belongs to the current diagnosis and session
+4. Regenerate the unified diff and refuse when `diff.text` no longer matches the edits
+5. Resolve canonical paths (symlink, jail, allowlist, sensitive-file checks)
+6. Submit one `WorkspaceEdit` for every planned file
+7. Report success only when `applyEdit` returns true, every save returns true, and a post-write read matches the planned bytes
+8. Do not retry a failed write automatically
+
+If a later save fails, files that were already saved are written back to their pre-apply contents. If the post-write hash does not match, Apply restores those contents. If that restore fails, the warning names the relative paths. Multi-file `WorkspaceEdit` is still not an atomic disk transaction: a crash during save can leave a subset of files updated.
+
+A proposal with no full-file baseline is refused. The excerpt digest alone is not enough.
+
+**Diagnose Latest Session** and **Refresh Diagnosis** use the newest captured Chrome session. Synthetic sessions (`browser.version` `0.0.0-fake`, including **Diagnose Test Session** and the Chrome **Submit test session** button) do not become that latest captured session. A captured submit shows a notification with a Diagnose action for that session id.
 
 ### Bridge authentication (implemented)
 
@@ -433,26 +454,11 @@ Windows and POSIX path spellings are tested even when only one OS is available.
 
 ### Stale-source and races
 
-Proposal hashes are SHA-256 of the **bounded excerpt representation**, not a live full-file hash. That is enough to invalidate a proposal after a new diagnosis (excerpt set / diagnosis fingerprint change). It is **not** a substitute for an Apply-time re-read of the file.
+`originalContentHash` is a SHA-256 of the bounded excerpt representation. Apply also requires `liveFileHashes`, a SHA-256 of the complete file, and refuses to write when that baseline is missing or no longer matches. The excerpt digest is not a substitute for the Apply-time re-read.
 
 `DiagnosisController` carries a generation counter. Clearing diagnosis during an in-flight run discards the result (`discarded`). Cancelling after a provider returns success does not apply that success.
 
 `runFixProposal` re-checks the current diagnosis after `await`. If the diagnosis was cleared or replaced, the proposal is `stale` and is not stored. A successful new diagnosis still clears any previous proposal before the new diagnosis is exposed.
-
-### Apply / Reject
-
-There are no Apply or Reject commands, no native diff editor, and no `WorkspaceEdit` usage. Reject-by-not-applying leaves the workspace unchanged because nothing writes it. Future Apply, if added, must:
-
-1. Re-read the target through VS Code APIs
-2. Hash current contents and compare with the trusted original-source hash (full file, not only excerpts)
-3. Confirm the proposal still belongs to the current diagnosis and session
-4. Confirm the diff text has not been mutated
-5. Resolve canonical paths (symlink + jail + allowlist + sensitive-file)
-6. Submit one validated `WorkspaceEdit`
-7. Never report success unless that edit was accepted
-8. Never retry a non-idempotent write automatically
-
-Filesystem-level atomicity of multi-file `WorkspaceEdit` is a VS Code platform limitation and must be documented if Apply is introduced.
 
 ### AI data flow
 
@@ -486,8 +492,8 @@ Redaction is heuristic. It will miss secrets that do not look like JWTs, named q
 - [ ] Bearer comparison remains timing-safe; pairing token never logged
 - [ ] Origin policy not weakened to make tests pass
 - [ ] Candidate allowlist and source-hash validation not bypassed
-- [ ] No `WorkspaceEdit` / `writeFile` / `fs.writeFile` from proposal or TreeView code
+- [ ] Apply remains the only `WorkspaceEdit` path, and it still re-checks the full-file hash, stored diff, canonical path, and confirmation before writing
 - [ ] No new AI SDKs, cloud endpoints, or telemetry
 - [ ] Schema/protocol changes ship with compatibility tests
-- [ ] Future Apply must implement canonical path + stale-source re-read before any write
+- [ ] Future Apply changes must keep the canonical path check and the stale-source re-read
 

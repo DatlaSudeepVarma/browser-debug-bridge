@@ -9,6 +9,7 @@ import {
   inspectLiveText,
   liveExcerptsMatch,
 } from "./live-file.js";
+import { generateUnifiedDiff } from "./diff.js";
 import { validateFixPath, type FixPathRejection } from "./paths.js";
 import {
   buildBoundedSources,
@@ -28,9 +29,10 @@ import { validateProposedChange } from "./validation.js";
 
 /**
  * StoredProposal.originalContentHash is an excerpt digest from hashFileSource.
- * Production proposals also carry liveFileHashes (complete-file SHA-256).
- * trustedFullFileHashes is only for legacy in-memory proposals that predate
- * that field; it never overrides a stored baseline.
+ * Production proposals carry liveFileHashes (complete-file SHA-256).
+ * trustedFullFileHashes supplies that baseline for an older proposal.
+ * A proposal with neither baseline is refused. The trusted map never
+ * overrides a stored baseline.
  */
 export interface PlanSafeApplyInput {
   proposal: StoredProposal | undefined;
@@ -181,6 +183,10 @@ function planSafeApplyUnchecked(input: PlanSafeApplyInput): ApplyPlanResult {
   if (validated.status !== "ok") {
     return refuse("APPLY_PROPOSAL_MALFORMED", "The stored proposal failed host-side revalidation.");
   }
+  const regenerated = generateUnifiedDiff(validated.proposedChange, sources);
+  if (regenerated.status !== "ok" || regenerated.text !== proposal.diff.text) {
+    return refuse("APPLY_DIFF_MISMATCH", "The stored unified diff does not match the proposed edits.");
+  }
 
   const files: SafeApplyFilePlan[] = [];
 
@@ -240,14 +246,14 @@ function planSafeApplyUnchecked(input: PlanSafeApplyInput): ApplyPlanResult {
       storedHashes !== undefined
         ? storedHashes[lexical.relativePath]
         : input.trustedFullFileHashes?.[lexical.relativePath];
-    if (storedHashes !== undefined && expectedFullFileHash === undefined) {
+    if (expectedFullFileHash === undefined) {
       return refuse(
-        "APPLY_SOURCE_CHANGED",
-        "The proposal is missing a trusted full-file baseline for this path.",
+        "APPLY_BASELINE_MISSING",
+        "The proposal has no trusted full-file baseline for this path.",
         { relativePath: lexical.relativePath },
       );
     }
-    if (expectedFullFileHash !== undefined && expectedFullFileHash !== currentContentHash) {
+    if (expectedFullFileHash !== currentContentHash) {
       return refuse(
         "APPLY_SOURCE_CHANGED",
         "The complete file changed outside the trusted excerpt baseline.",

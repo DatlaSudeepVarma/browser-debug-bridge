@@ -1,9 +1,12 @@
 import type { DebugSessionV1 } from "@browser-debug-bridge/schema";
 import { MAX_SESSIONS } from "./constants.js";
 
+export type SessionOrigin = "captured" | "synthetic";
+
 export interface StoredSession {
   session: DebugSessionV1;
   receivedAt: number;
+  origin: SessionOrigin;
 }
 
 export class SessionStore {
@@ -11,11 +14,15 @@ export class SessionStore {
 
   public constructor(private readonly maxSessions: number = MAX_SESSIONS) {}
 
-  public add(session: DebugSessionV1, receivedAt = Date.now()): string[] {
+  public add(
+    session: DebugSessionV1,
+    receivedAt = Date.now(),
+    origin: SessionOrigin = "captured",
+  ): string[] {
     if (this.sessions.has(session.sessionId)) {
       this.sessions.delete(session.sessionId);
     }
-    this.sessions.set(session.sessionId, { session, receivedAt });
+    this.sessions.set(session.sessionId, { session, receivedAt, origin });
     const evicted: string[] = [];
     while (this.sessions.size > this.maxSessions) {
       const oldest = this.sessions.keys().next().value;
@@ -44,9 +51,12 @@ export class SessionStore {
     return [...this.sessions.keys()];
   }
 
-  public latest(): StoredSession | undefined {
+  public latest(origin?: SessionOrigin): StoredSession | undefined {
     let found: StoredSession | undefined;
     for (const item of this.sessions.values()) {
+      if (origin !== undefined && item.origin !== origin) {
+        continue;
+      }
       if (found === undefined || item.receivedAt >= found.receivedAt) {
         found = item;
       }

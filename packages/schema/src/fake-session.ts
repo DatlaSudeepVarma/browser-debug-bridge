@@ -9,6 +9,12 @@ function createId(): string {
   return globalThis.crypto.randomUUID();
 }
 
+const SYNTHETIC_BROWSER_VERSION = "0.0.0-fake";
+
+export function isSyntheticDebugSession(session: Pick<DebugSessionV1, "browser">): boolean {
+  return session.browser.version === SYNTHETIC_BROWSER_VERSION;
+}
+
 export function createFakeDebugSessionV1(
   overrides: Partial<Pick<DebugSessionV1, "sessionId" | "userDescription">> = {},
 ): DebugSessionV1 {
@@ -24,7 +30,7 @@ export function createFakeDebugSessionV1(
     },
     browser: {
       name: "Chrome",
-      version: "0.0.0-fake",
+      version: SYNTHETIC_BROWSER_VERSION,
       extensionVersion: "0.1.0",
     },
     userDescription:

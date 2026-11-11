@@ -1,5 +1,5 @@
 export const EMPTY_DIAGNOSIS_MESSAGE =
-  'No diagnosis available.\n\nRun "Browser Debug Bridge: Diagnose Test Session"';
+  'No diagnosis available.\n\nCapture a page in Chrome, then run "Browser Debug Bridge: Diagnose Latest Session".';
 
 export const NO_SESSION_MESSAGE =
   "No debug session available. Start a browser debugging session first.";
@@ -64,10 +64,18 @@ export const APPLY_STALE_AFTER_WRITE_MESSAGE =
 export const APPLY_WRITE_FAILED_MESSAGE = "The proposed change was not applied. No workspace files were modified.";
 
 export const APPLY_UNSAVED_MESSAGE =
-  "The proposed change was applied in the editor but could not be saved. It was not reported as applied.";
+  "The proposed change was not saved. Previous file contents were restored.";
 
 export const APPLY_VERIFY_FAILED_MESSAGE =
   "The workspace files did not match the proposed change after writing. It was not reported as applied.";
+
+export const APPLY_VERIFY_RESTORED_MESSAGE =
+  "The saved files did not match the proposed change. Previous contents were restored.";
+
+export function applyUnrestoredMessage(relativePaths: readonly string[]): string {
+  const listed = relativePaths.slice(0, 3).join(", ");
+  return `The proposed change could not be finished, and these files could not be restored: ${listed}. Check them before editing further.`;
+}
 
 export function applyConfirmMessage(fileCount: number): string {
   const files = fileCount === 1 ? "1 file" : `${String(fileCount)} files`;

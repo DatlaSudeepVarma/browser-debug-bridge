@@ -78,7 +78,9 @@ export type ApplyPlanErrorCode =
   | "APPLY_SOURCE_CHANGED"
   | "APPLY_EDIT_INVALID"
   | "APPLY_PROPOSAL_MALFORMED"
-  | "APPLY_TEXT_AMBIGUOUS";
+  | "APPLY_TEXT_AMBIGUOUS"
+  | "APPLY_DIFF_MISMATCH"
+  | "APPLY_BASELINE_MISSING";
 
 export interface ApplyPlanRefusal {
   code: ApplyPlanErrorCode;

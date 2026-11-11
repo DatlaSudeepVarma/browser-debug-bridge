@@ -11,10 +11,12 @@ export type WorkspaceWriteResult =
   | { status: "not-applied" }
   | { status: "unsaved" }
   | { status: "dirty" }
-  | { status: "mismatch" };
+  | { status: "mismatch" }
+  | { status: "unrestored"; relativePaths: readonly string[] };
 
 export interface WorkspaceFileWriter {
   write(plan: SafeApplyPlan): Promise<WorkspaceWriteResult>;
+  restore(plan: SafeApplyPlan): Promise<"restored" | "unrestored">;
 }
 
 export type ApplyFixOutcome =
@@ -25,7 +27,12 @@ export type ApplyFixOutcome =
   | { status: "no-proposal" }
   | { status: "stale" }
   | { status: "stale-after-write" }
-  | { status: "write-failed"; detail: "not-applied" | "unsaved" | "verify" | "mismatch" };
+  | {
+      status: "write-failed";
+      detail: "not-applied" | "unsaved" | "verify" | "mismatch" | "unrestored";
+      restored?: boolean;
+      relativePaths?: readonly string[];
+    };
 
 export interface RunApplyFixInput {
   proposalController: FixProposalController;
@@ -38,6 +45,7 @@ export interface RunApplyFixInput {
   canonicalIo: CanonicalPathIo;
   confirm: (fileCount: number) => Promise<boolean>;
   write: WorkspaceFileWriter["write"];
+  restore?: (plan: SafeApplyPlan) => Promise<"restored" | "unrestored">;
 }
 
 /**
@@ -76,7 +84,7 @@ export async function runApplyFix(input: RunApplyFixInput): Promise<ApplyFixOutc
       return { status: "stale" };
     }
 
-    const written = await input.write({
+    const appliedPlan: SafeApplyPlan = {
       identity: proposal.identity,
       files: replanned.files.map((file) => ({
         relativePath: file.relativePath,
@@ -87,7 +95,8 @@ export async function runApplyFix(input: RunApplyFixInput): Promise<ApplyFixOutc
         proposedContentHash: sha256Utf8(file.proposedContent),
         edits: proposal.proposedChange.changes.find((change) => change.relativePath === file.relativePath)?.edits ?? [],
       })),
-    });
+    };
+    const written = await input.write(appliedPlan);
     if (written.status === "dirty") {
       return {
         status: "refused",
@@ -104,15 +113,28 @@ export async function runApplyFix(input: RunApplyFixInput): Promise<ApplyFixOutc
       return { status: "write-failed", detail: "not-applied" };
     }
     if (written.status === "unsaved") {
-      return { status: "write-failed", detail: "unsaved" };
+      return { status: "write-failed", detail: "unsaved", restored: true };
+    }
+    if (written.status === "unrestored") {
+      return { status: "write-failed", detail: "unrestored", relativePaths: written.relativePaths };
     }
 
     const verified = await input.readLiveFiles(proposal);
-    for (const file of replanned.files) {
-      const text = verified[file.relativePath];
-      if (text === undefined || sha256Utf8(text) !== sha256Utf8(file.proposedContent)) {
-        return { status: "write-failed", detail: "verify" };
+    const mismatched = replanned.files
+      .filter((file) => {
+        const text = verified[file.relativePath];
+        return text === undefined || sha256Utf8(text) !== sha256Utf8(file.proposedContent);
+      })
+      .map((file) => file.relativePath);
+    if (mismatched.length > 0) {
+      if (input.restore === undefined) {
+        return { status: "write-failed", detail: "verify", restored: false };
       }
+      const restored = await input.restore(appliedPlan);
+      if (restored !== "restored") {
+        return { status: "write-failed", detail: "unrestored", relativePaths: mismatched };
+      }
+      return { status: "write-failed", detail: "verify", restored: true };
     }
     if (!input.proposalController.consumeApplied(proposal)) {
       return { status: "stale-after-write" };

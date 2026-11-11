@@ -12,14 +12,24 @@ import { OPEN_CANDIDATE_COMMAND, REVIEW_FIX_COMMAND } from "./constants.js";
 import type { DiagnosisViewState } from "./diagnosis-state.js";
 import { asPlainTooltip, asPlainTreeText } from "./plain-text.js";
 
+export type TreeIcon = "lightbulb" | "file" | "diff" | "warning" | "pass" | "error" | "sync" | "info";
+
+export interface DiagnosisTreeActivity {
+  diagnosing: boolean;
+  proposing: boolean;
+  applying: boolean;
+  statusDetail?: string;
+}
+
 export interface DiagnosisTreeCommand {
   command: string;
   title: string;
-  arguments: readonly string[];
+  arguments: readonly (string | number)[];
 }
 
-export type DiagnosisTreeNode =
+export type DiagnosisTreeNode = (
   | { kind: "summary"; id: string; label: string; tooltip: string }
+  | { kind: "summary-text"; id: string; label: string; tooltip: string }
   | { kind: "hypotheses"; id: string; label: string }
   | {
       kind: "hypothesis";
@@ -84,7 +94,14 @@ export type DiagnosisTreeNode =
       relativePath: string;
     }
   | { kind: "proposal-changes"; id: string; label: string }
-  | { kind: "proposal-diff"; id: string; label: string; tooltip: string };
+  | { kind: "proposal-diff"; id: string; label: string; tooltip: string }
+) & {
+  description?: string;
+  icon?: TreeIcon;
+  expanded?: boolean;
+  line?: number;
+  relativePath?: string;
+};
 
 export function getRootNodes(state: DiagnosisViewState | undefined): DiagnosisTreeNode[] {
   if (state === undefined) {
@@ -95,8 +112,11 @@ export function getRootNodes(state: DiagnosisViewState | undefined): DiagnosisTr
     {
       kind: "summary",
       id: "summary",
-      label: asPlainTreeText(diagnosis.summary),
+      label: "Summary",
+      description: asPlainTreeText(diagnosis.summary),
       tooltip: asPlainTooltip(diagnosis.summary),
+      icon: "info",
+      expanded: true,
     },
   ];
   if (diagnosis.hypotheses.length > 0) {
@@ -135,15 +155,28 @@ export function getChildNodes(
   state: DiagnosisViewState,
   node: DiagnosisTreeNode,
   proposal?: ProposalTreeState,
+  activity?: DiagnosisTreeActivity,
 ): DiagnosisTreeNode[] {
   switch (node.kind) {
+    case "summary":
+      return [
+        {
+          kind: "summary-text",
+          id: "summary-text",
+          label: asPlainTreeText(state.diagnosis.summary, 240),
+          tooltip: asPlainTooltip(state.diagnosis.summary),
+        },
+      ];
     case "hypotheses":
       return state.diagnosis.hypotheses.map((hypothesis, index) => ({
         kind: "hypothesis" as const,
         id: `hypothesis:${String(index)}`,
         index,
         label: asPlainTreeText(hypothesis.title),
-        tooltip: asPlainTooltip(hypothesis.title),
+        description: asPlainTreeText(hypothesis.explanation),
+        tooltip: asPlainTooltip(`${hypothesis.title}\n${hypothesis.explanation}`),
+        icon: "lightbulb" as const,
+        expanded: index === 0,
       }));
     case "hypothesis":
       return hypothesisChildren(state, node.index);
@@ -154,10 +187,9 @@ export function getChildNodes(
       );
     case "hypothesis-candidates":
       return candidateFileNodes(
-        state.diagnosis.hypotheses[hypothesisIndexFromId(node.id)]?.candidateFiles.map(
-          (file) => file.relativePath,
-        ) ?? [],
+        state.diagnosis.hypotheses[hypothesisIndexFromId(node.id)]?.candidateFiles ?? [],
         node.id,
+        state.project,
       );
     case "suggested-next-step":
       return [
@@ -185,9 +217,10 @@ export function getChildNodes(
         id: `limitation:${String(index)}`,
         label: asPlainTreeText(limitation),
         tooltip: asPlainTooltip(limitation),
+        icon: "warning",
       }));
     case "proposed-fix":
-      return proposedFixChildren(proposal);
+      return proposedFixChildren(proposal, activity);
     case "proposal-files":
       return proposalFileNodes(proposal?.proposal);
     default:
@@ -196,20 +229,22 @@ export function getChildNodes(
 }
 
 export function openableRelativePath(node: DiagnosisTreeNode): string | undefined {
-  if (node.kind === "candidate" || node.kind === "candidate-group" || node.kind === "proposal-file") {
-    return node.relativePath;
-  }
-  if (node.kind === "excerpt") {
+  if (
+    node.kind === "candidate" ||
+    node.kind === "candidate-group" ||
+    node.kind === "excerpt" ||
+    (node.kind === "evidence-ref" && node.relativePath !== undefined)
+  ) {
     return node.relativePath;
   }
   return undefined;
 }
 
 export function treeItemCommand(node: DiagnosisTreeNode): DiagnosisTreeCommand | undefined {
-  if (node.kind === "proposal-diff") {
+  if (node.kind === "proposal-diff" || node.kind === "proposal-file") {
     return {
       command: REVIEW_FIX_COMMAND,
-      title: "Review Proposed Fix",
+      title: "Open diff",
       arguments: [],
     };
   }
@@ -220,12 +255,13 @@ export function treeItemCommand(node: DiagnosisTreeNode): DiagnosisTreeCommand |
   return {
     command: OPEN_CANDIDATE_COMMAND,
     title: "Open Candidate File",
-    arguments: [relativePath],
+    arguments: node.line === undefined ? [relativePath] : [relativePath, node.line],
   };
 }
 
 export function nodeCanHaveChildren(node: DiagnosisTreeNode): boolean {
   switch (node.kind) {
+    case "summary":
     case "hypotheses":
     case "hypothesis":
     case "hypothesis-evidence":
@@ -247,6 +283,7 @@ export function nodeCanHaveChildren(node: DiagnosisTreeNode): boolean {
 export function collectTreeNodes(
   state: DiagnosisViewState | undefined,
   proposal?: ProposalTreeState,
+  activity?: DiagnosisTreeActivity,
 ): DiagnosisTreeNode[] {
   if (state === undefined) {
     return [];
@@ -255,7 +292,7 @@ export function collectTreeNodes(
   const walk = (current: DiagnosisTreeNode[]): void => {
     for (const node of current) {
       nodes.push(node);
-      walk(getChildNodes(state, node, proposal));
+      walk(getChildNodes(state, node, proposal, activity));
     }
   };
   walk(getRootNodes(state));
@@ -334,24 +371,7 @@ function projectEvidenceChildren(state: DiagnosisViewState): DiagnosisTreeNode[]
     seenCandidates.add(candidateIndex);
     const candidate = state.project.candidates[candidateIndex];
     const relativePath = candidate?.relativePath ?? `candidate[${String(candidateIndex)}]`;
-    const hasExcerpts = (candidate?.excerpts.length ?? 0) > 0;
-    if (hasExcerpts && candidate !== undefined) {
-      nodes.push({
-        kind: "candidate-group",
-        id: `project-evidence:candidate:${String(candidateIndex)}`,
-        label: asPlainTreeText(relativePath),
-        tooltip: asPlainTooltip(relativePath),
-        relativePath: candidate.relativePath,
-      });
-    } else {
-      nodes.push({
-        kind: "candidate",
-        id: `project-evidence:candidate:${String(candidateIndex)}`,
-        label: asPlainTreeText(relativePath),
-        tooltip: asPlainTooltip(relativePath),
-        relativePath,
-      });
-    }
+    nodes.push(candidateNode(relativePath, `project-evidence:candidate:${String(candidateIndex)}`, state.project, item.detail));
   }
   return nodes;
 }
@@ -377,14 +397,34 @@ function candidateDetailChildren(
   return nodes;
 }
 
-function candidateFileNodes(paths: string[], parentId: string): DiagnosisTreeNode[] {
-  return paths.map((relativePath, index) => ({
-    kind: "candidate" as const,
-    id: `${parentId}:${String(index)}`,
+function candidateNode(
+  relativePath: string,
+  id: string,
+  project: ProjectContext,
+  reason?: string,
+): DiagnosisTreeNode {
+  const candidate = findCandidate(project, relativePath);
+  const explanation = (reason?.trim() || candidate?.reasons[0]?.explanation || "").trim();
+  return {
+    kind: "candidate",
+    id,
     label: asPlainTreeText(relativePath),
-    tooltip: asPlainTooltip(relativePath),
+    description: explanation.length > 0 ? asPlainTreeText(explanation) : undefined,
+    tooltip: asPlainTooltip(explanation.length > 0 ? explanation : relativePath),
     relativePath,
-  }));
+    line: candidate?.excerpts[0]?.startLine,
+    icon: "file",
+  };
+}
+
+function candidateFileNodes(
+  files: readonly { relativePath: string; reason?: string }[],
+  parentId: string,
+  project: ProjectContext,
+): DiagnosisTreeNode[] {
+  return files.map((file, index) =>
+    candidateNode(file.relativePath, `${parentId}:${String(index)}`, project, file.reason),
+  );
 }
 
 function evidenceRefNodes(items: DiagnosisEvidence[], parentId: string): DiagnosisTreeNode[] {
@@ -392,6 +432,7 @@ function evidenceRefNodes(items: DiagnosisEvidence[], parentId: string): Diagnos
     kind: "evidence-ref" as const,
     id: `${parentId}:${String(index)}`,
     label: asPlainTreeText(formatEvidenceLabel(item.source)),
+    description: item.detail.trim().length > 0 ? asPlainTreeText(item.detail) : undefined,
     tooltip: evidenceTooltip(item),
     source: item.source,
   }));
@@ -440,13 +481,38 @@ function collectEvidence(diagnosis: Diagnosis, project: ProjectContext): Diagnos
   return refs;
 }
 
-function proposedFixChildren(proposal?: ProposalTreeState): DiagnosisTreeNode[] {
+function proposedFixChildren(
+  proposal?: ProposalTreeState,
+  activity?: DiagnosisTreeActivity,
+): DiagnosisTreeNode[] {
+  if (activity?.diagnosing === true || activity?.proposing === true) {
+    const diagnosing = activity.diagnosing === true;
+    return [
+      {
+        kind: "proposal-status",
+        id: "proposal-status",
+        label: diagnosing ? "Status: Diagnosing…" : "Status: Proposing a fix…",
+        tooltip: diagnosing
+          ? "A diagnosis is running. The previous proposal stays hidden until it finishes."
+          : "A fix proposal is running. No workspace files are being modified.",
+        icon: "sync",
+      },
+    ];
+  }
   const nodes: DiagnosisTreeNode[] = [
     {
       kind: "proposal-status",
       id: "proposal-status",
       label: proposalStatusLabel(proposal),
-      tooltip: proposalStatusTooltip(proposal),
+      tooltip:
+        activity?.statusDetail !== undefined && activity.statusDetail.trim().length > 0
+          ? asPlainTooltip(activity.statusDetail)
+          : proposalStatusTooltip(proposal, activity),
+      icon: proposalStatusIcon(proposal),
+      description:
+        activity?.statusDetail !== undefined && activity.statusDetail.trim().length > 0
+          ? asPlainTreeText(activity.statusDetail)
+          : undefined,
     },
   ];
   const stored = proposal?.proposal;
@@ -479,8 +545,10 @@ function proposedFixChildren(proposal?: ProposalTreeState): DiagnosisTreeNode[] 
     {
       kind: "proposal-diff",
       id: "proposal-diff",
-      label: "Ready for review",
-      tooltip: "Open a native diff of the current file against the proposed change. No workspace files will be written.",
+      label: "Open diff",
+      icon: "diff",
+      tooltip:
+        "Open a native diff of the current file against the proposed change. No workspace files will be written.",
     },
   );
   return nodes;
@@ -494,8 +562,10 @@ function proposalFileNodes(stored: StoredProposal | undefined): DiagnosisTreeNod
     kind: "proposal-file" as const,
     id: `proposal-file:${String(index)}`,
     label: asPlainTreeText(change.relativePath),
-    tooltip: asPlainTooltip(change.relativePath),
+    description: "Open diff",
+    tooltip: asPlainTooltip(`${change.relativePath}\nOpen diff. No workspace files will be written.`),
     relativePath: change.relativePath,
+    icon: "file",
   }));
 }
 
@@ -503,8 +573,11 @@ function proposalStatusLabel(proposal?: ProposalTreeState): string {
   if (proposal?.generating === true) {
     return "Status: Generating";
   }
+  if (proposal?.proposal !== undefined && proposal.reviewed === true) {
+    return "Status: Reviewed";
+  }
   if (proposal?.proposal !== undefined) {
-    return "Status: Ready";
+    return "Status: Ready for review";
   }
   if (proposal?.lastOutcome === "failed") {
     return "Status: Failed";
@@ -521,9 +594,34 @@ function proposalStatusLabel(proposal?: ProposalTreeState): string {
   return "Status: Not generated";
 }
 
-function proposalStatusTooltip(proposal?: ProposalTreeState): string {
+function proposalStatusIcon(proposal?: ProposalTreeState): TreeIcon {
+  if (proposal?.proposal !== undefined && proposal.reviewed === true) {
+    return "pass";
+  }
   if (proposal?.proposal !== undefined) {
-    return "In-memory proposed change. It has not been applied.";
+    return "diff";
+  }
+  if (proposal?.lastOutcome === "failed") {
+    return "error";
+  }
+  if (proposal?.lastOutcome === "cancelled" || proposal?.lastOutcome === "rejected") {
+    return "warning";
+  }
+  if (proposal?.lastOutcome === "applied") {
+    return "pass";
+  }
+  return "info";
+}
+
+function proposalStatusTooltip(proposal?: ProposalTreeState, activity?: DiagnosisTreeActivity): string {
+  if (proposal?.proposal !== undefined && proposal.reviewed === true) {
+    return "Diff opened. Apply is available. No workspace files have been written.";
+  }
+  if (proposal?.proposal !== undefined) {
+    return "In-memory proposed change. Open the diff before applying. No workspace files have been written.";
+  }
+  if (activity?.statusDetail !== undefined && activity.statusDetail.trim().length > 0) {
+    return asPlainTooltip(activity.statusDetail);
   }
   if (proposal?.lastOutcome === "rejected") {
     return 'The proposed change was discarded without modifying any files. Run "Browser Debug Bridge: Propose Fix" to generate another suggestion.';

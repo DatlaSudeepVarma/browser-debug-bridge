@@ -8,7 +8,7 @@ import { createFixtureAiProjectContext } from "../ai/test-support.js";
 import { createProjectIntelligenceSession } from "../project/test-fixtures/session.js";
 import { DiagnosisController } from "../ui/diagnosis-state.js";
 import { collectTreeNodes } from "../ui/diagnosis-tree.js";
-import { applyConfirmMessage } from "../ui/messages.js";
+import { applyConfirmDetail, applyConfirmMessage } from "../ui/messages.js";
 import { applyFixUserNotice } from "../ui/notifications.js";
 import { runDiagnosis } from "../ui/run-diagnosis.js";
 import { FAKE_CHECKOUT_SOURCE, FAKE_FIX_PROPOSAL, jsonProposal } from "./fake-proposal.js";
@@ -468,10 +468,12 @@ describe("explicit apply", () => {
 
   it("names the files in the confirm prompt and does not write from the planner module", () => {
     const message = applyConfirmMessage(["src/a.ts", "src/b.ts"]);
-    assert.equal(message.includes("src/a.ts"), true);
-    assert.equal(message.includes("src/b.ts"), true);
+    const detail = applyConfirmDetail(["src/a.ts", "src/b.ts"]);
+    assert.equal(message.includes("overwritten"), true);
+    assert.equal(detail.includes("src/a.ts"), true);
+    assert.equal(detail.includes("src/b.ts"), true);
     assert.equal(message.includes(FAKE_CHECKOUT_SOURCE), false);
-    assert.equal(message.includes("fetch("), false);
+    assert.equal(detail.includes("fetch("), false);
     const root = path.dirname(fileURLToPath(import.meta.url));
     const runner = readFileSync(path.join(root, "run-apply.ts"), "utf8");
     assert.equal(/from ["']vscode["']/.test(runner), false);

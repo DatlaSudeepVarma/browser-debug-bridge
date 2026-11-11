@@ -52,11 +52,12 @@
       {
         "command": "browserDebugBridge.diagnoseLatestSession",
         "title": "Diagnose Latest Session",
-        "category": "Browser Debug Bridge"
+        "category": "Browser Debug Bridge",
+        "icon": "$(lightbulb)"
       },
       {
         "command": "browserDebugBridge.refreshDiagnosis",
-        "title": "Refresh Diagnosis",
+        "title": "Refresh",
         "category": "Browser Debug Bridge",
         "icon": "$(refresh)"
       },
@@ -74,7 +75,8 @@
       {
         "command": "browserDebugBridge.reviewFix",
         "title": "Review Proposed Fix",
-        "category": "Browser Debug Bridge"
+        "category": "Browser Debug Bridge",
+        "icon": "$(diff)"
       },
       {
         "command": "browserDebugBridge.rejectFix",
@@ -85,7 +87,8 @@
       {
         "command": "browserDebugBridge.applyFix",
         "title": "Apply Proposed Fix",
-        "category": "Browser Debug Bridge"
+        "category": "Browser Debug Bridge",
+        "icon": "$(check)"
       }
     ],
     "viewsContainers": {
@@ -108,25 +111,30 @@
     "viewsWelcome": [
       {
         "view": "browserDebugBridge.diagnosis",
-        "contents": "No diagnosis available.\n\nCapture a page in Chrome, then run \"Browser Debug Bridge: Diagnose Latest Session\"."
+        "contents": "No diagnosis yet.\n\nCapture a page in Chrome, then diagnose it.\n[Diagnose Latest Session](command:browserDebugBridge.diagnoseLatestSession)"
       }
     ],
     "menus": {
       "view/title": [
         {
+          "command": "browserDebugBridge.diagnoseLatestSession",
+          "when": "view == browserDebugBridge.diagnosis",
+          "group": "navigation@0"
+        },
+        {
           "command": "browserDebugBridge.refreshDiagnosis",
           "when": "view == browserDebugBridge.diagnosis",
-          "group": "navigation"
+          "group": "navigation@1"
         },
         {
           "command": "browserDebugBridge.clearDiagnosis",
           "when": "view == browserDebugBridge.diagnosis",
-          "group": "navigation"
+          "group": "navigation@2"
         },
         {
           "command": "browserDebugBridge.proposeFix",
-          "when": "view == browserDebugBridge.diagnosis",
-          "group": "navigation"
+          "when": "view == browserDebugBridge.diagnosis && browserDebugBridge.hasDiagnosis",
+          "group": "navigation@3"
         },
         {
           "command": "browserDebugBridge.reviewFix",
@@ -145,6 +153,11 @@
         }
       ],
       "view/item/context": [
+        {
+          "command": "browserDebugBridge.reviewFix",
+          "when": "view == browserDebugBridge.diagnosis && browserDebugBridge.hasFixProposal && (viewItem == proposal-file || viewItem == proposal-diff)",
+          "group": "inline"
+        },
         {
           "command": "browserDebugBridge.rejectFix",
           "when": "view == browserDebugBridge.diagnosis && browserDebugBridge.hasFixProposal && (viewItem == proposal-diff || viewItem == proposal-status || viewItem == proposed-fix)",

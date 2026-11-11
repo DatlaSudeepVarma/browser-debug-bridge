@@ -35,7 +35,8 @@ export const REVIEW_SOURCE_DIRTY_MESSAGE =
 
 export const REVIEW_DIFF_FAILED_MESSAGE = "The proposed change could not be opened in the diff editor.";
 
-export const REVIEW_OPENED_MESSAGE = "Opened a read-only diff of the proposed change. No files were written.";
+export const REVIEW_OPENED_MESSAGE =
+  "Diff opened. Apply is available. No workspace files were modified.";
 
 export const FIX_REJECTED_MESSAGE =
   "Proposed change rejected. No workspace files were modified. The diagnosis is still available.";
@@ -80,12 +81,17 @@ export function applyUnrestoredMessage(relativePaths: readonly string[]): string
   return `The proposed change could not be finished, and these files could not be restored: ${listed}. Check them before editing further.`;
 }
 
-export function applyConfirmMessage(relativePaths: readonly string[]): string {
+export function applyConfirmMessage(_relativePaths: readonly string[]): string {
+  return "Apply this proposed change? The current workspace contents will be overwritten and saved.";
+}
+
+export function applyConfirmDetail(relativePaths: readonly string[]): string {
   const names = relativePaths.slice(0, 8);
-  const listed = names.join(", ");
   const extra =
-    relativePaths.length > names.length ? `, and ${String(relativePaths.length - names.length)} more` : "";
-  return `Apply this proposed change to ${listed}${extra}? The current workspace contents will be overwritten and saved.`;
+    relativePaths.length > names.length
+      ? `\n…and ${String(relativePaths.length - names.length)} more`
+      : "";
+  return `${names.join("\n")}${extra}`;
 }
 
 export function missingCandidateMessage(relativePath: string): string {

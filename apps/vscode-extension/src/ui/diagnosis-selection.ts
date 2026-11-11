@@ -28,11 +28,15 @@ export function selectDiagnosisSession(
 }
 
 export function clearDiagnosisView(input: {
-  diagnosis: { clearDiagnosis(): void };
-  proposals: { isApplying(): boolean; clear(): void };
+  diagnosis: { clearDiagnosis(): void; isRunning(): boolean };
+  proposals: { isApplying(): boolean; getTreeState(): { generating: boolean }; clear(): void };
   clearPreview(): void;
 }): "cleared" | "busy" {
-  if (input.proposals.isApplying()) {
+  if (
+    input.diagnosis.isRunning() ||
+    input.proposals.isApplying() ||
+    input.proposals.getTreeState().generating
+  ) {
     return "busy";
   }
   input.proposals.clear();

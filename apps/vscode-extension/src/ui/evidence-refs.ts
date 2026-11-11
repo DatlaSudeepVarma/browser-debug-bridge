@@ -79,15 +79,15 @@ export function formatEvidenceLabel(source: string): string {
     case "hints":
       return "Session hints";
     case "console":
-      return `Console #${String(parsed.index)}`;
+      return "Console";
     case "network":
-      return `Network #${String(parsed.index)}`;
+      return "Network";
     case "framework":
       return "Project framework";
     case "candidate":
-      return `Candidate #${String(parsed.index)}`;
+      return "Candidate file";
     case "excerpt":
-      return `Excerpt #${String(parsed.excerptIndex)}`;
+      return "Excerpt";
   }
 }
 

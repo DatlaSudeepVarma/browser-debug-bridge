@@ -106,5 +106,21 @@ describe("diagnosis session selection", () => {
     assert.equal(diagnosis.getDiagnosis()?.diagnosis.summary, fixtureDiagnosisState().diagnosis.summary);
     assert.equal(proposals.getProposal()?.createdAt, "proposal");
     assert.equal(previewClears, 1);
+
+    const running = new DiagnosisController();
+    running.setDiagnosis(fixtureDiagnosisState());
+    assert.equal(running.beginRun(), true);
+    assert.equal(
+      clearDiagnosisView({
+        diagnosis: running,
+        proposals: new FixProposalController(),
+        clearPreview: () => {
+          previewClears += 1;
+        },
+      }),
+      "busy",
+    );
+    assert.equal(running.getDiagnosis()?.diagnosis.summary, fixtureDiagnosisState().diagnosis.summary);
+    assert.equal(previewClears, 1);
   });
 });

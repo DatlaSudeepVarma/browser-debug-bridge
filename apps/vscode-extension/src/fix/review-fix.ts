@@ -1,6 +1,5 @@
 import type { CanonicalPathIo } from "./canonical-path.js";
 import { planSafeApply } from "./apply-plan.js";
-import { posixBasename } from "../project/workspace.js";
 import type { DiagnosisViewState } from "../ui/diagnosis-state.js";
 import type { ApplyPlanErrorCode, ApplyPlanRefusal, StoredProposal } from "./types.js";
 
@@ -94,7 +93,7 @@ export function prepareFixReview(input: PrepareFixReviewInput): PrepareFixReview
       canonicalPath: file.canonicalPath,
       currentContent: file.currentContent,
       proposedContent: file.proposedContent,
-      title: `${posixBasename(file.relativePath)} (Proposed change)`,
+      title: `${file.relativePath} (Current ↔ Proposed)`,
     })),
   };
 }

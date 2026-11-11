@@ -5,7 +5,6 @@ import { userFacingAiError } from "./ai-errors.js";
 import { userFacingFixError } from "./fix-errors.js";
 import {
   DIAGNOSIS_BUSY_MESSAGE,
-  DIAGNOSIS_COMPLETE_MESSAGE,
   DIAGNOSIS_DISCARDED_MESSAGE,
   FIX_BUSY_MESSAGE,
   FIX_COMPLETE_MESSAGE,
@@ -32,7 +31,7 @@ import {
 import { userFacingReviewError } from "./review-errors.js";
 import type { DiagnosisRunOutcome } from "./run-diagnosis.js";
 
-export type UserNotice = { kind: "info" | "warn"; message: string };
+export type UserNotice = { kind: "info" | "warn" | "silent"; message: string };
 
 export function diagnosisLogLines(outcome: DiagnosisRunOutcome): string[] {
   switch (outcome.status) {
@@ -61,7 +60,7 @@ export function diagnosisLogLines(outcome: DiagnosisRunOutcome): string[] {
 export function diagnosisUserNotice(outcome: DiagnosisRunOutcome): UserNotice {
   switch (outcome.status) {
     case "replaced":
-      return { kind: "info", message: DIAGNOSIS_COMPLETE_MESSAGE };
+      return { kind: "silent", message: "" };
     case "preserved":
       return { kind: "warn", message: userFacingAiError(outcome.result.error) };
     case "cancelled":

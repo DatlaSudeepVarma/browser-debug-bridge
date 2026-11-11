@@ -1,271 +1,159 @@
 # Architecture
 
-This document records the architecture already decided for Browser Debug Bridge V1. It is not a proposal.
+This document describes the architecture that is implemented. Review, Reject, and Apply are part of that path.
 
-## 1. Product purpose
+## 1. Data flow
 
-Browser Debug Bridge is a local-first developer tool:
-
-**Browser debugging session → project-aware diagnosis → proposed code fix.**
-
-The intended path is:
-
-1. Chrome
-2. Browser debugging session
-3. Local bridge
-4. VS Code
-5. Project-aware diagnosis
-6. Proposed code fix
-7. Developer approval
-8. Apply
-
-V1 does not include a cloud backend, hosted API, dashboard, or database. Work stays on the developer's machine. Nothing is applied to the workspace without explicit developer approval.
-
-## 2. Chrome extension
-
-`apps/chrome-extension` is a Manifest V3 extension.
-
-Phase 4 capture is session-scoped. The popup **Start Debug Session** control asks the service worker to inject `content-script.js` into the current tab with `chrome.scripting.executeScript` and `activeTab`. There is no permanent `content_scripts` registration and no `<all_urls>` permission.
-
-```
-Page (picker / DOM / CSS / element geometry / session-scoped console / network failures)
-    → chrome.runtime messaging
-    → service worker (screenshot + console + network ring buffers)
-    → hide overlay, captureVisibleTab, crop, JPEG, SHA-256
-    → POST /sessions/:sessionId/screenshot (raw JPEG)
-    → redaction + DebugSessionV1 metadata + session.submit
-    → 127.0.0.1:17321
-    → VS Code in-memory session + screenshot stores
+```text
+Chrome Extension
+    → Local HTTP Bridge
+    → VS Code Extension
+    → Workspace Intelligence
+    → Built-in Language Model
+    → Diagnosis
+    → Proposed Unified Diff
+    → Safety Planner
+    → User Confirmation
+    → WorkspaceEdit
 ```
 
-The content script never receives the pairing token. Bridge authentication stays in the service worker and `src/bridge` client.
+A captured page becomes a `DebugSessionV1`. The VS Code extension stores it in memory, ranks files in the open workspace, and asks `vscode.lm` for a diagnosis and then for structured edits. The host builds the unified diff. `planSafeApply` refuses a proposal that fails path, hash, or diff checks. The user must open Review and then confirm the named files. Only then does Apply submit one `WorkspaceEdit`.
 
-Temporary picker/session status uses `chrome.storage.session`. The pairing token and a per-installation tab-id salt stay in `chrome.storage.local`. Captured HTML and screenshot bytes are not written to disk.
+There is no project-owned cloud backend, hosted API, dashboard, or database. The language model is the one VS Code selects. Nothing is written unless the user confirms Apply.
 
-DebugSessionV1 contains only screenshot **metadata** (`mime`, `width`, `height`, `sha256`, `cropped`). JPEG bytes travel on a separate authenticated endpoint. `console[]` holds up to 50 session-scoped, redacted entries. `network[]` holds up to 100 session-scoped failure metadata records (no bodies or headers).
+## 2. Package responsibilities
 
-## 3. VS Code extension
-
-`apps/vscode-extension` is a VS Code extension using the official Extension API.
-
-Its job is to receive a debug session, inspect the open project, present a diagnosis, propose a code fix, and apply that fix only after an explicit confirmation.
-
-Phase 1 established the extension foundation and a Hello smoke-test command. Phase 3 starts a loopback HTTP bridge inside the extension process, stores pairing tokens in SecretStorage, and keeps recent DebugSession payloads in memory. Phase 6 adds a deterministic, local **project intelligence** subsystem that turns a DebugSession plus the open workspace into a bounded `ProjectContext`. Phase 7 sends that pair to a read-only AI provider abstraction (`vscode.lm` first). Phase 8 presents the validated `Diagnosis` in a native TreeView. Phase 9 turns that diagnosis into an in-memory proposed change and unified diff. Phase 11 audited that pipeline and hardened authentication, path, and state-consistency controls. It does not modify files. Native diff review and Apply/Reject were specified after Phase 9 and are **not present** in this tree.
-
-## 4. Shared packages
-
-Two workspace packages are shared by the apps:
-
-### `@browser-debug-bridge/schema`
-
-Shared contract between Chrome and VS Code. Phase 2 implements:
-
-- DebugSession V1 types
-- protocol message types, versioned independently of DebugSession
-- Zod runtime validators
-- size and version constants
-
-Both sides must validate data at runtime. TypeScript types alone are not trusted across process boundaries. Screenshot *bytes* are not part of DebugSession; the schema stores only screenshot metadata.
-
-### `@browser-debug-bridge/redaction`
-
-Phase 2 implements reusable, host-agnostic sanitization:
-
-- URL redaction
-- DOM-like attribute and value sanitization
-- secret/JWT-like text handling
-- workspace patch path protection
-
-Chrome capture reuses these functions. It does not duplicate redaction rules. Page text, URLs, attributes, and user descriptions are data, never instructions.
-
-There is no separate protocol-client, API, or server package in V1.
-
-## 5. Local bridge
-
-Chrome and VS Code communicate through a **local HTTP bridge** owned by the VS Code extension.
-
-- Bind address: `127.0.0.1` only (never `0.0.0.0`)
-- Port: `17321` (`BRIDGE_PORT`)
-- Transport in this phase: HTTP only (no WebSocket `/events` yet)
-- Auth: `Authorization: Bearer <pairing-token>` on session endpoints
-- Pairing token: 256-bit value in VS Code `SecretStorage`, copied into Chrome `chrome.storage.local` via the development pairing command
-- Origin: browser requests must use `chrome-extension://<configured-id>`
-- Sessions: validated with `@browser-debug-bridge/schema`, stored in memory (max 20), not written to disk
-
-There is no separate Node app, cloud API, or database.
-
-## 6. AI provider abstraction
-
-Read-only diagnosis uses a provider-neutral `AiProvider`:
-
-```
-isAvailable()
-complete({ system, user })
-```
-
-`DiagnosisService` serializes `DebugSessionV1` + `ProjectContext`, builds prompts, calls the provider, and validates JSON into a bounded `Diagnosis`. The model never receives filesystem, terminal, or workspace-edit APIs. Future OpenAI-compatible BYOK providers can implement the same interface. Their SDKs are not dependencies.
-
-The first provider is **`vscode.lm`**: `selectChatModels()`, then `LanguageModelChat.sendRequest()` with two User messages (the API has no system role). If several models exist, the first after a vendor/family/id sort is used. That is a stable choice, not a quality ranking. No model id is hard-coded. If no model is available, the result is `AI_UNAVAILABLE`.
-
-## 7. Security-first philosophy
-
-Security is a product constraint, not a later add-on:
-
-- Local-first: session data is not designed to leave the machine for a V1 backend.
-- Least privilege: Chrome permissions are storage, `activeTab`, `scripting`, and the existing loopback host permission. `debugger`, `webRequest`, `cookies`, `tabs`, and `<all_urls>` are not requested.
-- Redaction before sharing: URLs, DOM, secrets, and sensitive fields are stripped in `@browser-debug-bridge/redaction` before a session is submitted.
-- Patch path protection: generated fixes must not silently touch protected paths.
-- Human approval: Apply writes only after Review has been opened for that proposal and a modal confirmation that names the files. Reject drops the in-memory proposal and does not write. A failed save restores files that were already saved.
-
-Phase 5A added cropped screenshot capture. Phase 5B added session-scoped console capture. Phase 5C added session-scoped network failure metadata. Phase 6 added deterministic project intelligence. Phase 7 adds read-only AI diagnosis. Phase 8 adds a read-only diagnosis TreeView. Phase 9 adds in-memory unified diffs. Phase 11 hardens integration and security around that pipeline. Review, Reject, and Apply are now implemented on top of it.
-
-## 8. Phase 4–5C capture details
-
-### Permissions
-
-| Permission | Why |
+| Package | Responsibility |
 | --- | --- |
-| `storage` | Pairing token (`local`) and temporary capture status (`session`) |
-| `activeTab` | Access only the tab the user invoked the extension on |
-| `scripting` | Inject the picker/content script and session-scoped MAIN-world console/network hooks |
-| `host_permissions`: `http://127.0.0.1:17321/*` | Existing local bridge (unchanged) |
+| `apps/chrome-extension` | Manifest V3 popup, element picker, DOM/CSS/console/network capture, JPEG upload, and the loopback client |
+| `apps/vscode-extension` | Loopback HTTP bridge, session store, workspace intelligence, diagnosis, proposal, review, reject, and apply |
+| `packages/schema` | `DebugSessionV1`, protocol messages, Zod validators, and size constants |
+| `packages/redaction` | URL, DOM, text, and workspace-path checks used by both apps |
 
-`activeTab` + `scripting` are sufficient for session-scoped page interaction. Host access to arbitrary sites is not required because the user starts capture from the toolbar popup on the current tab.
+The Chrome content script does not hold the pairing token. Bridge calls stay in the service worker and `src/bridge`. The VS Code TreeView does not call `vscode.lm`. It reads controllers that already hold a validated diagnosis or proposal.
 
-### Element picker
+There is no separate protocol-client, API, or server package.
 
-The injected script draws a temporary overlay (`data-bdb-picker-host`) in a closed shadow root. Hover highlights the element under the pointer; click selects it; Escape cancels. The overlay is removed on select (after the description prompt), cancel, navigation/`pagehide`, or extension disconnect. It does not persist styles in the application.
+## 3. Shared contracts
 
-### Captured fields
+`@browser-debug-bridge/schema` is the contract across the Chrome process and the extension host. TypeScript types are not trusted at the boundary. Both sides parse with Zod.
 
-The payload is a `DebugSessionV1`:
+`PROTOCOL_VERSION` is `1`. `DEBUG_SESSION_SCHEMA_VERSION` versions the session independently of the protocol envelope.
 
-- `selectedElement`: selector, tag, id, classes, role, textPreview, rect, ancestorPath
-- `dom`: `outerHtmlTruncated`, `htmlBytes`, `truncated`
-- `css`: allowlisted `computedSubset` plus compact `matchedRuleSummaries`
-- `page`: redacted url/title/origin
-- `browser`: Chrome/Chromium name + version + extension version
-- `userDescription`: optional, schema-bounded, untrusted text
-- `capture.tabIdHash`: SHA-256 of `salt:tabId` (32 hex chars). Salt is a per-installation 256-bit random value in `chrome.storage.local` (`browserDebugBridge.tabIdSalt`). Raw tab ids are never stored in the session.
-- `capture.permissionsGranted`: `activeTab` and `scripting` only
-- `screenshot`: JPEG metadata only (`mime`, `width`, `height`, `sha256`, `cropped`)
-- `console`: up to 50 `{ level, message, timestamp, stack? }` entries from the active session only
-- `network`: up to 100 `{ timestamp, method, urlRedacted, status?, resourceType?, error? }` failure records from the active session only
+The live HTTP messages are:
 
-`htmlBytes` is the UTF-8 size of the sanitized HTML before truncation, capped at the schema maximum.
+| Message | Where it is used |
+| --- | --- |
+| `health.response` | `GET /health` |
+| `pair.status` | `GET /pair-status` |
+| `pair.token` | `POST /pair` body |
+| `pair.token.result` | Successful pair response |
+| `session.submit` | `POST /sessions` |
+| `session.ack` | `POST /sessions/:sessionId/ack` and the submit response |
+| `screenshot.ack` | JPEG upload response |
+| `error` | Rejected requests, with a `ProtocolErrorCode` |
 
-### Cropped screenshots
+The schema also defines `pair.request` and `pair.response`. The running bridge does not serve that pairing-code exchange. Pairing is `pair.token`.
 
-After the user selects an element and hides the picker overlay, the service worker calls `chrome.tabs.captureVisibleTab` (granted by existing `activeTab`; no `debugger` permission). Only the currently visible region is captured. The page is not scrolled. The overlay is not in the image.
+`DebugSessionV1` carries the selected element, truncated DOM, an allowlisted CSS subset, redacted page fields, browser name and version, an optional user description, a hashed tab id, screenshot **metadata**, up to 50 console entries, and up to 100 network-failure records. JPEG bytes are not a session field.
 
-The visible-tab PNG is cropped to the selected element's clamped viewport rectangle, scaled down if needed to **1600×1200** (never upscaled), and encoded as JPEG quality ~0.8, max **1 MB**. `screenshot.sha256` is SHA-256 of those final JPEG bytes.
+`createFakeDebugSessionV1()` builds a synthetic session whose `browser.version` is `0.0.0-fake`. `isSyntheticDebugSession` recognizes that version.
+
+## 4. Session lifecycle
+
+1. The user pairs, then clicks **Start Debug Session**. The service worker injects the picker and the MAIN-world console and network hooks into the current tab. There is no permanent `content_scripts` entry.
+2. Hover highlights an element. Click selects it. Escape, **Cancel capture**, navigation, or tab close stops the session and clears the in-memory console and network buffers.
+3. After selection, the overlay is hidden. The service worker captures the visible tab, crops it, and uploads the JPEG.
+4. The worker redacts the capture, builds `session.submit`, and posts it. The bridge validates the body, stores the session, and returns `session.ack`.
+5. A captured session (any browser version other than `0.0.0-fake`) becomes the latest captured session and shows **Chrome debug session received.** with a **Diagnose** action for that session id.
+6. **Diagnose Latest Session** uses that captured session. It does not create one. **Refresh** reloads the Diagnosis view and does not call the model. If a proposal exists, Diagnose asks before replacing it.
+7. **Submit test session**, **Create Test Session**, and **Diagnose Test Session** use a synthetic session. A later synthetic session does not replace the latest captured session.
+8. Diagnosis success replaces the previous diagnosis and clears any previous proposal. Failure, cancellation, and a cleared in-flight run keep or discard results without storing a partial diagnosis. See Failure handling.
+9. **Propose Fix** stores an in-memory proposal. **Review Proposed Fix** marks that proposal reviewed after the diff opens. **Reject Proposed Fix** drops the proposal and keeps the diagnosis. **Apply Proposed Fix** writes, then clears the proposal.
+10. **Clear Diagnosis** drops the diagnosis, the proposal, and the preview unless Apply is already running.
+11. Bridge stop and extension deactivation clear the in-memory session and screenshot stores. They are not written to disk.
+
+The bridge keeps at most 20 sessions. Adding a session that is already stored does not refresh `receivedAt` and does not notify again. A different payload for an existing session id is rejected. An idempotent `requestId` whose session was already evicted is acknowledged and is not stored again.
+
+## 5. Authentication
+
+The bridge binds `127.0.0.1` port `17321`. Tests may use an ephemeral port. It does not bind `0.0.0.0`.
+
+The pairing token is 32 random bytes, encoded as 64 hex characters. VS Code stores it in SecretStorage under `browserDebugBridge.pairingToken`. **Show Pairing Code** displays it. Chrome stores it in `chrome.storage.local` only after `pair.token.result` parses as paired.
+
+| Route | Auth |
+| --- | --- |
+| `GET /health` | none |
+| `GET /pair-status` | none |
+| `OPTIONS` | none |
+| `POST /pair` | the token in the JSON body |
+| `POST /sessions`, screenshot upload and delete, `POST /sessions/:sessionId/ack` | `Authorization: Bearer <token>` |
+
+Bearer comparison uses a timing-safe equality check when the lengths match. A length mismatch returns before that compare. The token is not written into session JSON or bridge logs.
+
+When an `Origin` header is present it must be `chrome-extension://` plus `browserDebugBridge.chromeExtensionId`. A request with no `Origin` is accepted so local curl can reach the bridge. A page fetch sends its own origin and does not match. `Host` must be `127.0.0.1` or `127.0.0.1` with a numeric port. A host that smuggles another authority is rejected.
+
+JSON bodies stop at 5 MB. JPEG bodies stop at 1 MB and must start with JPEG magic bytes.
+
+## 6. Data redaction
+
+`@browser-debug-bridge/redaction` is the shared implementation. Chrome does not keep a second copy of the rules.
+
+- `redactUrl` redacts sensitive query names, JWTs, and any query value whose name is not in `PUBLIC_QUERY_PARAMETER_NAMES` (`id`, `q`, `query`, `search`, `state`, `page`, `limit`, `offset`, `sort`, `order`, `tab`, `view`, `lang`, `locale`, `ref`, `utm_source`, `utm_medium`, `utm_campaign`, `utm_content`, `utm_term`). Token-like URL fragments are redacted. A fragment without those shapes, such as a short slug, can remain.
+- `redactSensitiveText` redacts JWTs and `Bearer` tokens in free text.
+- DOM helpers redact sensitive attributes, `javascript:` URLs, and `data:` URLs.
+- `inspectWorkspacePath` rejects traversal, NUL bytes, absolute paths outside the workspace folder, UNC and `\\?\` paths, drive-relative paths, and sensitive basenames such as `.env` and private-key names. `~` is not expanded.
+
+Redaction runs before submit. Page text, URLs, attributes, and the user description stay untrusted data. The model is told not to follow instructions inside them.
+
+This is not complete secret detection. A value that matches none of those shapes can remain in DOM text or a console message. Console stacks can still contain file paths. Screenshot pixels are not OCR'd.
+
+## 7. Screenshot handling
+
+After the user selects an element, the service worker calls `chrome.tabs.captureVisibleTab`. Only the visible region is captured. The page is not scrolled. The picker overlay is hidden first.
+
+The PNG is cropped to the selected element's clamped viewport rectangle, scaled down when needed to 1600×1200, and encoded as JPEG at quality about 0.8. The result must be at most 1 MB. `screenshot.sha256` is the SHA-256 of those final bytes.
 
 Bytes are uploaded first:
 
-`POST /sessions/:sessionId/screenshot`  
-`Content-Type: image/jpeg`  
-`Authorization: Bearer <token>`
+`POST /sessions/:sessionId/screenshot` with `Content-Type: image/jpeg` and the bearer token.
 
-Then `session.submit` is sent. JPEG sessions are rejected unless a pending screenshot with the matching SHA-256 is already in memory. If metadata is rejected, the pending JPEG is deleted. Session eviction also deletes the screenshot. Nothing is written to disk. Restarting VS Code drops both stores.
+`session.submit` is accepted for a JPEG session only when a pending artifact with that SHA-256 is already stored. A rejected metadata body deletes the pending JPEG. Evicting a session deletes its screenshot. At most 20 artifacts are kept. Nothing is written to disk.
 
-Screenshots are sensitive. Visible pixels inside the selected region may include secrets. They are **not** treated as fully redactable, are not sent to AI or a cloud service, and are not persisted.
+The model receives mime, dimensions, hash, and whether the image was cropped. It does not receive the bytes. The Diagnosis view does not render them.
 
-### Session-scoped console
+## 8. AI interaction
 
-Capture starts when the user clicks **Start Debug Session** and stops on submit, cancel, Escape, navigation/`pagehide`, extension disconnect, or tab close. There is no permanent global listener and no historical DevTools console dump.
+`AiProvider` is `isAvailable()` and `complete({ system, user })`. `DiagnosisService` and `FixProposalService` share that interface. The first implementation is `vscode.lm`: `selectChatModels()`, then `sendRequest` with two User messages, because that API has no system role. If several models exist, the extension uses the first after a stable vendor, family, and id sort. No model id is hard-coded. No model means `AI_UNAVAILABLE`.
 
-**What is captured**
+Diagnosis input is the serialized session plus the bounded `ProjectContext`: page, selected element, DOM, CSS, screenshot metadata, console, network failures, the user description, framework and package-manager hints, and ranked excerpts. The model does not receive pairing tokens, cookies, authorization headers, request bodies, screenshot bytes, workspace roots, or files outside the excerpt budget.
 
-- Page `console.debug` / `log` / `info` / `warn` / `error` after a session-scoped MAIN-world hook (`chrome.scripting.executeScript` `world: "MAIN"`, not `chrome.debugger`)
-- Window `error` and `unhandledrejection` events, stored as `console[]` **error** entries prefixed `[page error]` / `[unhandled rejection]` (runtime error evidence, not `console.log` calls)
-- Only the debugging tab. Raw tab ids are not stored (`tabIdHash` only)
+Limits on the diagnosis prompt include 24,000 characters, 8 candidate files, 2 excerpts per file, 40 lines per excerpt, 20 console entries, and 20 network entries. If the budget still cannot be met, the result is `AI_CONTEXT_TOO_LARGE`.
 
-**What is not captured**
+The model must return JSON and cite serializer ids (`BROWSER.*` and `PROJECT.candidate[n]`). Unknown evidence ids and file paths that were not in `ProjectContext` are dropped. Diagnosis text is bounded. The response is not executed.
 
-- Console activity from before the session
-- Other tabs, windows, background pages, or unrelated origins
-- Browser-generated DevTools-only lines (failed network, CSP, extension, or Chrome-internal messages) that never go through page `console` or `window` error events
-- `console.time` / `group` / `count` and similar non-message methods
-- Complete browser console history
+The fix prompt is a separate budget. It includes the validated diagnosis and at most three diagnosis-referenced candidate files with excerpts that were already captured. If those excerpts are missing, the result is `AI_FIX_CONTEXT_INSUFFICIENT`. The model returns `{ relativePath, startLine, endLine, replacement }` edits. The host generates the unified diff. The model is not given a shell, `git`, or `WorkspaceEdit`.
 
-Isolated-world monkey-patching cannot see page-script `console` calls. The MAIN-world hook restores the original methods when the session ends. The page can still overwrite `console` after install; that is documented, not “fixed” with debugger access.
+One diagnosis run and one proposal run are in flight at a time. A second request is busy.
 
-Levels map as: `debug|log|info|warn|error` unchanged; `warning` → `warn`; `fatal|exception|assert` → `error`; `verbose` → `debug`; `dir|dirxml|table|trace` → `log`; anything else is ignored.
+## 9. File ranking
 
-The service worker keeps an in-memory ring buffer of the **most recent 50** entries (`MAX_CONSOLE_ENTRIES`). Messages are clipped to 4096 characters; stacks to 2048 (schema allows 8192). Arguments are serialized with bounded depth (4), property count (20), array length (20), string length (256), and total size (2048) without invoking getters or functions. Circular references become `[Circular]`. Failures become `[Unserializable value]`.
+Workspace intelligence is local and deterministic. `ProjectContext` is not sent to Chrome and is not stored on the bridge.
 
-Console text is untrusted. `@browser-debug-bridge/redaction` plus conservative bearer/query-pair heuristics are applied before submit. Redaction is **not** complete secret detection. Extension logs may include buffer size only, never message contents.
-
-Reload or navigation invalidates the current session (existing picker lifecycle). The hook dies with the page; the service worker clears the buffer. A new page is not attached to the old session.
-
-### Session-scoped network failures
-
-This is **not** a HAR recorder and not a DevTools network panel. Capture starts with **Start Debug Session** and stops when the session ends. Only the current page is observed. `127.0.0.1:17321` / `localhost:17321` bridge traffic is never recorded.
-
-**What is captured**
-
-- Page `fetch` responses with HTTP status **>= 400**
-- Rejected `fetch` promises (connection failures)
-- `XMLHttpRequest` load with status >= 400, plus `error` / `abort`
-- Metadata only: `method` (uppercase; unknown methods become `GET`), redacted URL, optional status, optional `fetch` / `xmlhttprequest` resource type, optional short error
-
-**What is not captured**
-
-- HTTP 2xx / 3xx including 301, 302, 304
-- Request or response bodies
-- Request or response headers, cookies, Authorization
-- Other tabs, extension requests, or VS Code bridge requests
-- Images / scripts / stylesheets that fail outside page `fetch` / XHR (no `webRequest` / `debugger`)
-- Complete browser network history
-
-The MAIN-world hook wraps `window.fetch` and `XMLHttpRequest.prototype.open` / `send`, returns original results, does not clone or consume bodies, and restores the originals on session end. The page can overwrite `fetch` after install.
-
-URLs always pass through `redactUrl()` before `urlRedacted`. Duplicate network events with the same method, redacted URL, status/error within 250 ms are dropped. The service worker keeps the **most recent 100** failures (`MAX_NETWORK_ENTRIES`). URLs clip at 2048 characters; errors at 512. Extension logs may include buffer size only, never raw URLs.
-
-Reload or navigation clears the buffer with the existing session lifecycle.
-
-### Not captured
-
-Cookies, authorization headers, `localStorage` / `sessionStorage` / IndexedDB, password-manager data, complete browser console history, successful network traffic, request/response bodies, full-page or other-tab screenshots, browser chrome, and workspace files.
-
-Cross-origin stylesheets that throw when reading `cssRules` are skipped. Capture continues; a bounded evidence note may be added.
-
-## 9. Project intelligence (Phase 6)
-
-Project intelligence is a VS Code-only, in-memory analysis step:
-
-```
+```text
 DebugSessionV1
-    → workspace resolution (all folders; never assume folder[0] is the only root)
-    → bounded findFiles (max 500 source files, ignore generated/secret paths)
-    → manifest / lockfile reads
-    → deterministic signals + scores
-    → ranked candidates (max 12)
+    → every open workspace folder
+    → findFiles, at most 500 source files, shared across roots
+    → small manifest and lockfile reads
+    → named integer scores
+    → at most 12 ranked candidates
     → bounded excerpts
     → ProjectContext
 ```
 
-`ProjectContext` is internal. It is not sent to Chrome, not written to disk, and not exposed on the HTTP bridge.
+Browser URLs, selectors, console stacks, and network paths are search signals. They are not filesystem paths. A candidate path is `workspaceRoot` plus a relative path discovered inside that root.
 
-### Workspace jail
-
-Browser fields (URLs, selectors, console stacks, network paths) are untrusted search signals. They never become arbitrary filesystem paths. File access is `workspaceRoot + internally discovered relative path`. `inspectWorkspacePath` rejects traversal, absolute paths outside the folder, UNC paths, `.env*`, keys, PEM files, and credentials files. Home-directory `~` is not expanded.
-
-If no workspace is open, analysis returns `{ status: "no-workspace" }` instead of scanning the disk.
-
-### Discovery and ignores
-
-`vscode.workspace.findFiles` (or the test memory workspace) lists source files with a hard cap of **500**. Multi-root folders share that budget so the first folder cannot consume the entire scan. Ignored directories include `.git`, `node_modules`, `.next`, `dist`, `build`, `coverage`, `out`, `target`, `vendor`, `.cache`, `tmp`, and `logs`.
-
-This is not a full-repository walk and not a HAR or ripgrep product.
-
-### Framework and package manager
-
-Framework and language hints come from small manifests (`package.json`, `tsconfig.json`, lockfiles, common `*.config.*` names). Detection prefers package names (`next`, `nuxt`, `@angular/core`, `astro`, `svelte`, `vue`, `react`) over random filename matches. Package manager evidence is lockfile/workspace-file presence: bun, then pnpm, then yarn, then npm.
-
-### Candidate signals and scoring
-
-Scores are named integer weights, not statistical confidence:
+Ignored directories include `.git`, `node_modules`, `.next`, `dist`, `build`, `coverage`, `out`, `target`, `vendor`, `.cache`, `tmp`, and `logs`. Framework hints prefer package names (`next`, `nuxt`, `@angular/core`, `astro`, `svelte`, `vue`, `react`) over filename guesses. Package-manager evidence is lockfile presence, in the order bun, pnpm, yarn, npm.
 
 | Signal | Weight |
 | --- | --- |
@@ -273,200 +161,106 @@ Scores are named integer weights, not statistical confidence:
 | Page URL path segment | 40 |
 | Network failure URL path segment | 25 |
 | Selected element id | 25 |
-| data-testid | 20 |
-| Component / file name | 20 |
+| `data-testid` | 20 |
+| Component or file name | 20 |
 | Class name | 15 |
 | Framework routing convention | 10 |
-| Selected text (weak) | 5 |
+| Selected text | 5 |
 
-Ties break by workspace folder name, then relative path. The list is **ranked candidates**, not a claim that the first file is correct.
+Ties break by workspace folder name, then relative path. The first file is a rank, not a claim that it is the cause.
 
-### Excerpts
+Excerpts are at most 3 per file and 40 lines each, with 200 context lines in total. Files larger than 256 KB are not fully loaded. A cancelled run returns `{ status: "cancelled" }` and is not stored as a completed analysis. No open workspace returns `{ status: "no-workspace" }`.
 
-At most **3** excerpts per file, **40** lines each, **200** total context lines. Files larger than **256 KB** are not fully loaded; excerpts are omitted unless a target line is already known. Entire files are never attached.
+## 10. Proposal validation
 
-### Cancellation and privacy
+`FixProposalService` checks the model JSON before anything is stored.
 
-`CancellationToken` is checked between stages. Cancelled runs return `{ status: "cancelled" }` and are not treated as a completed analysis. Raw workspace files are not sent to Chrome. Phase 7 may send only the already-bounded `ProjectContext` excerpts to `vscode.lm`.
+Every path must be:
 
-### Limitations
+1. a diagnosis candidate
+2. accepted by `inspectWorkspacePath`
+3. free of sensitive basenames
 
-Project intelligence cannot always identify the responsible source file. It does not read source maps unless they already appear as workspace-safe console paths. Resource types outside page `fetch` / XHR, generated CSS hashes, and files the page overwrote after hook install remain invisible.
+An unsafe proposal is refused. It is not truncated into a smaller edit. Duplicate paths, empty edit lists, malformed ranges, edits outside the trusted excerpt, and overlapping edits are refused.
 
-## 10. Read-only AI diagnosis (Phase 7)
+The host hashes the bounded excerpt (`originalContentHash`) and ignores any hash the model supplies. A proposal built from excerpt A is invalid against excerpt B. Session and diagnosis fingerprints are stored on the proposal. A later diagnosis clears the previous proposal before the new diagnosis is shown.
 
-```
-DebugSessionV1 + ProjectContext
-    → AI serializer (second size budget, redaction, evidence IDs)
-    → system + user prompts
-    → AiProvider.complete
-    → JSON extract + validation
-    → Diagnosis
-```
+`planSafeApply` runs those checks again and also:
 
-The model sees page, selected element, DOM, CSS, screenshot **metadata**, console, network, hints, user description, framework/language/package-manager, and ranked candidate excerpts. It does not see pairing tokens, Authorization headers, cookies, bodies, `.env` / keys, workspace roots, screenshot bytes, or the rest of the repository.
+- refuses a missing, malformed, or identity-inconsistent proposal (`APPLY_NO_PROPOSAL`, `APPLY_PROPOSAL_MALFORMED`, `APPLY_IDENTITY_MISMATCH`)
+- refuses a proposal that does not belong to the current session and diagnosis (`APPLY_DIAGNOSIS_MISMATCH`)
+- refuses a path that fails the lexical jail (`APPLY_PATH_REJECTED`) or whose real path leaves the workspace (`APPLY_CANONICAL_REJECTED`)
+- refuses a missing file (`APPLY_FILE_MISSING`)
+- refuses edits that do not replay onto the live file (`APPLY_EDIT_INVALID`, `APPLY_TEXT_AMBIGUOUS`)
+- regenerates the unified diff and refuses when `diff.text` differs (`APPLY_DIFF_MISMATCH`)
 
-AI context limits include `MAX_AI_INPUT_CHARS` (24k), 8 candidate files, 2 excerpts/file, 40 excerpt lines, 20 console entries, and 20 network entries. Truncation is deterministic. If the budget still cannot be met, the result is `AI_CONTEXT_TOO_LARGE`.
+## 11. Hash verification
 
-Browser text and source excerpts are wrapped as untrusted data. The system prompt forbids following instructions inside them, inventing files, or emitting patches.
+Two hashes are in use. They are not interchangeable.
 
-The model must cite `BROWSER.*` and `PROJECT.candidate[n]` IDs generated by the serializer. After parse, unknown evidence IDs and file paths that were not in `ProjectContext` are removed with a warning.
+| Hash | What it covers | When it is checked |
+| --- | --- | --- |
+| `originalContentHash` | SHA-256 of the bounded excerpt the model saw | Proposal validation and the safety planner |
+| `liveFileHashes` | SHA-256 of the complete file | Safety planner, immediately before `WorkspaceEdit` |
 
-Diagnosis fields are bounded (4 hypotheses, 5 evidence items each, short summary/explanation). Output is untrusted JSON. Nothing in the response is executed.
+Apply refuses when the full-file baseline is missing (`APPLY_BASELINE_MISSING`). The excerpt digest is not a substitute. Apply refuses when the file on disk no longer matches that baseline (`APPLY_SOURCE_CHANGED`).
 
-Supported errors: `AI_UNAVAILABLE`, `AI_REQUEST_FAILED`, `AI_RESPONSE_INVALID`, `AI_RESPONSE_TOO_LARGE`, `AI_CANCELLED`, `AI_CONTEXT_TOO_LARGE`. Logs may include provider id, candidate count, and context character count. Full prompts, excerpts, URLs, and secrets are not logged.
+After a successful save, Apply reads the file again and compares it with the SHA-256 of the planned contents. A mismatch restores the previous contents when it can. If the restore fails, the result names the relative paths.
 
-This cannot always find the root cause. It does not modify files.
+## 12. Safe application
 
-## 11. Diagnosis TreeView (Phase 8)
+`browserDebugBridge.reviewFix` opens a read-only VS Code diff of each planned file. `markReviewed` runs only after that open succeeds, and only if the proposal is still current. Replacing the proposal clears the reviewed flag.
 
-```
-Browser Debug Session
-        ↓
-DebugSessionV1
-        ↓
-Project Intelligence
-        ↓
-DiagnosisService
-        ↓
-Validated Diagnosis
-        ↓
-DiagnosisController (in-memory)
-        ↓
-VS Code TreeView
-```
+`browserDebugBridge.rejectFix` drops the in-memory proposal and its preview. The diagnosis stays. No file is written.
 
-The TreeView id is `browserDebugBridge.diagnosis`. The activity-bar container title is **Browser Debug Bridge**. The view stays visible with an empty-state message when no diagnosis is stored.
+`browserDebugBridge.applyFix` is the only `WorkspaceEdit` path. `runApplyFix`:
 
-Dependency direction is `TreeView → DiagnosisController → DiagnosisService → AiProvider`. The view never calls `vscode.lm`.
+1. Refuses while diagnosis or another apply is running.
+2. Runs `planSafeApply` against a fresh read of the live files.
+3. Refuses with `APPLY_NOT_REVIEWED` until this proposal has been reviewed.
+4. Confirms with the user. The dialog lists the relative paths.
+5. Plans again. If the after-image changed, the result is `stale` and nothing is written.
+6. Asks the writer to re-resolve each canonical path. A path that no longer matches the planned real path returns `mismatch` and is not opened.
+7. Opens `vscode.Uri.file` of that real path and submits one `WorkspaceEdit` for every planned file.
+8. Saves. If a later save fails, files that were already saved are written back to their previous contents.
+9. Verifies the post-write hash. Success clears the proposal. A mismatch restores the previous contents.
 
-### State lifecycle
+A dirty editor buffer is `REVIEW_SOURCE_DIRTY`. Apply does not overwrite it.
 
-`DiagnosisController` holds the current `Diagnosis` plus the `ProjectContext` used to produce it. State is memory-only: it is not written to disk, Chrome, or the bridge.
+A crash during a multi-file save can still leave a subset of files updated. Apply does not retry on its own. The gap between the last canonical recheck and the editor open is small, and a symlink swap in that gap is not separately locked.
 
-Replacement is transactional:
+## 13. Failure handling
 
-- success replaces the previous diagnosis
-- failure keeps the previous diagnosis
-- cancel keeps the previous diagnosis
+| Situation | Result |
+| --- | --- |
+| Bridge port already taken | Activation reports that the local bridge could not start. Sessions are not accepted. |
+| Bad token, origin, host, JSON, or JPEG | HTTP error with a protocol code. A rejected token is not stored. A rejected session does not replace a stored one. |
+| Model missing | `AI_UNAVAILABLE`. The previous diagnosis stays. |
+| Model request throws | `AI_REQUEST_FAILED`. The previous diagnosis stays. |
+| Model JSON invalid or too large | `AI_RESPONSE_INVALID` or `AI_RESPONSE_TOO_LARGE`. The previous diagnosis or proposal stays. |
+| Prompt over budget | `AI_CONTEXT_TOO_LARGE` or `AI_FIX_CONTEXT_INSUFFICIENT`. Nothing new is stored. |
+| User or token cancels | `AI_CANCELLED` or `{ status: "cancelled" }`. An in-flight success that loses the generation check is `discarded` or `stale` and is not stored. |
+| User declines the confirm dialog | `declined`. The proposal stays. |
+| Proposal replaced during Apply | `stale` or `stale-after-write`. A write that already finished is not reported as a clean apply. |
+| Save fails | Earlier files in that apply are restored. The proposal stays. |
+| Post-write hash mismatch | Previous contents are restored, or the warning names the paths that could not be restored. |
+| Page dispatches `bdb:console` or `bdb:network` during capture | The event is recorded like a hook event. URL text is still redacted. Apply still requires Review and confirmation. |
 
-`Refresh Diagnosis` re-runs `ProjectIntelligenceService` then `DiagnosisService` against the latest stored debug session. It does not capture the browser again and does not create a second session. `Clear Diagnosis` drops the in-memory result and restores the empty state. It does not delete workspace files.
+User notifications stay short. The output channel records error codes, not prompts, tokens, excerpts, or raw model text.
 
-### Presentation
+## 14. Security boundaries
 
-The tree summarizes the validated diagnosis: summary, hypotheses (explanation, evidence ids, candidate files), suggested next step, grouped evidence, and limitations. Empty sections are omitted. All model/browser-derived strings are flattened to plain TreeItem labels and tooltips. They are not rendered as HTML, Markdown, or commands.
+- Chrome permissions are `storage`, `activeTab`, and `scripting`, plus `http://127.0.0.1:17321/*`. The manifest does not request `<all_urls>`, `debugger`, `cookies`, `tabs`, or `webRequest`.
+- Capture is the current tab, and only after the user starts it. Cookies, authorization headers, storage APIs, request and response bodies, successful network calls, and other tabs are not collected.
+- Console and network hooks run in the page MAIN world and are removed when the session ends. The page can replace `console` or `fetch` after install. Bridge URLs on `127.0.0.1:17321` and `localhost:17321` are not recorded as network failures.
+- The content script never sees the pairing token. Tab ids are stored as SHA-256 of `salt:tabId`. The salt is a per-installation 256-bit value in `chrome.storage.local`.
+- Screenshot bytes and session JSON stay in the extension process. Restarting VS Code drops them.
+- `requestId` values are remembered for the life of the process. Reuse with a different session id is rejected. The protocol has no timestamp nonce. A process that already has the pairing token can submit a new session.
+- Proposed paths must be diagnosis candidates. Lexical checks do not follow symlinks. `inspectCanonicalWorkspaceTarget` resolves `realpath` and rejects a target outside the workspace. Apply resolves that path again and opens the real path.
+- The model cannot read the workspace or apply an edit. The host drops paths the model invents.
+- Review and the confirmation dialog are required. Reject writes nothing.
 
-Candidate files open with `openTextDocument` / `showTextDocument` after a final `inspectWorkspacePath` jail check against `ProjectContext` candidates. Excerpt previews use already captured `ProjectContext` excerpts; expanding the tree does not read additional files.
-
-**Phase 8 provides a read-only diagnosis UI. It does not generate or apply code changes.**
-
-## 12. Proposed fix and unified diff (Phase 9)
-
-```
-DiagnosisService
-      ↓
-Diagnosis
-      ↓
-FixProposalService
-      ↓
-ProposedChange
-      ↓
-DiffService
-      ↓
-ValidatedUnifiedDiff
-```
-
-`FixProposalService` reuses the existing `AiProvider`. It does not call `vscode.lm` from the TreeView and does not add a second provider stack.
-
-The model returns structured JSON edits (`relativePath`, `startLine`, `endLine`, `replacement`). The extension validates that JSON, then generates a unified diff in process. It does not run `git`, spawn a shell, or write files.
-
-### Fix-context boundary
-
-The fix prompt is a separate budget from diagnosis serialization. It includes the validated diagnosis, a small amount of browser evidence, and at most three diagnosis-referenced candidate files with already captured excerpts. If those excerpts are missing, the result is `AI_FIX_CONTEXT_INSUFFICIENT`. The model cannot request more files.
-
-### Candidate allowlist
-
-Every proposed path must survive:
-
-1. `ProjectContext` / serialized-context allowlist
-2. `inspectWorkspacePath()` workspace jail
-3. sensitive-file rejection (`.env`, keys, credentials, pem)
-
-Unsafe proposals are rejected. They are not truncated.
-
-### Stale-source protection
-
-The extension hashes the bounded excerpt representation itself (`originalContentHash`, plus session/diagnosis fingerprints). Model-supplied hashes are ignored. A proposal built from content A is invalid against content B. A new successful diagnosis clears any previous proposal before the new diagnosis is shown. Clearing diagnosis also clears the proposal.
-
-### Read-only behavior
-
-**Phase 9 generates a proposed code change and validated unified diff entirely in memory. It does not modify workspace files.**
-
-## 13. Phase 11 and the Apply path
-
-Phase 11 verified this pipeline and closed defects in it:
-
-`capture → DebugSessionV1 → loopback bridge → Project Intelligence → DiagnosisService → TreeView → FixProposalService → in-memory unified diff`
-
-Review, Reject, and Apply were added after that audit.
-
-### Apply / Reject
-
-`browserDebugBridge.reviewFix` opens a native diff of the planned full file. `browserDebugBridge.rejectFix` drops the in-memory proposal and its virtual preview. `browserDebugBridge.applyFix` is the only `WorkspaceEdit` path.
-
-Apply does all of the following before it writes:
-
-1. Re-read the target through the workspace file API
-2. Compare the current full-file SHA-256 with `liveFileHashes` (or an explicit trusted baseline)
-3. Confirm the proposal still belongs to the current diagnosis and session
-4. Regenerate the unified diff and refuse when `diff.text` no longer matches the edits
-5. Resolve canonical paths (symlink, jail, allowlist, sensitive-file checks)
-6. Require that Review was opened for this proposal, then confirm with the relative paths named
-7. Resolve each canonical path again and open that real path. A path that moved is refused
-8. Submit one `WorkspaceEdit` for every planned file
-9. Report success only when `applyEdit` returns true, every save returns true, and a post-write read matches the planned bytes
-10. Do not retry a failed write automatically
-
-If a later save fails, files that were already saved are written back to their pre-apply contents. If the post-write hash does not match, Apply restores those contents. If that restore fails, the warning names the relative paths. Multi-file `WorkspaceEdit` is still not an atomic disk transaction: a crash during save can leave a subset of files updated.
-
-A proposal with no full-file baseline is refused. The excerpt digest alone is not enough.
-
-**Diagnose Latest Session** and **Refresh Diagnosis** use the newest captured Chrome session. Synthetic sessions (`browser.version` `0.0.0-fake`, including **Diagnose Test Session** and the Chrome **Submit test session** button) do not become that latest captured session. A captured submit shows a notification with a Diagnose action for that session id.
-
-### Bridge authentication (implemented)
-
-- Bind: `127.0.0.1` only, port `17321` (tests may use an ephemeral port).
-- Session, screenshot, and ack endpoints require `Authorization: Bearer <256-bit hex pairing token>` compared with a timing-safe equality check.
-- Browser `Origin` must be `chrome-extension://<configured-id>` when an Origin header is present. Requests **without** Origin remain allowed for local curl / VS Code testing (documented exception, not a CORS wildcard).
-- `Host` must be `127.0.0.1` or `127.0.0.1:<1-65535>`. Values such as `127.0.0.1:17321@evil` are rejected.
-- JSON bodies are capped at 5 MB; JPEG screenshot bodies at 1 MB and must start with JPEG magic bytes.
-- At most 20 sessions and 20 screenshot artifacts are retained. Shutdown clears both stores.
-- `requestId` values are remembered for the life of the bridge process. Reusing a `requestId` for a **different** `sessionId` is rejected. An identical body for an existing `sessionId` is acknowledged and does not refresh `receivedAt`.
-- Submitting a **different** payload under an existing `sessionId` is rejected. The previous session is kept.
-
-Replay protection is **not** a timestamp/nonce scheme. The original protocol has no nonce field; adding one would break Chrome without a schema change. The `requestId` cache is the compatible control. A local process that already possesses the pairing token can still submit new sessions. That is accepted for V1 loopback pairing.
-
-### Workspace / path safety
-
-`inspectWorkspacePath` rejects traversal, NUL bytes, absolute paths outside the folder, UNC / `\\?\` device paths, drive-relative paths such as `C:secret.ts`, `.env*`, keys, PEM files, and credentials files.
-
-Lexical checks do **not** follow symlinks. `inspectCanonicalWorkspaceTarget` walks realpath (or a test double) when the workspace exists on disk and rejects a target whose canonical path leaves the workspace. `validateFixPath` requires the path to be on the diagnosis candidate allowlist **and** to pass both jails.
-
-Windows and POSIX path spellings are tested even when only one OS is available.
-
-### Stale-source and races
-
-`originalContentHash` is a SHA-256 of the bounded excerpt representation. Apply also requires `liveFileHashes`, a SHA-256 of the complete file, and refuses to write when that baseline is missing or no longer matches. The excerpt digest is not a substitute for the Apply-time re-read.
-
-`DiagnosisController` carries a generation counter. Clearing diagnosis during an in-flight run discards the result (`discarded`). Cancelling after a provider returns success does not apply that success.
-
-`runFixProposal` re-checks the current diagnosis after `await`. If the diagnosis was cleared or replaced, the proposal is `stale` and is not stored. A successful new diagnosis still clears any previous proposal before the new diagnosis is exposed.
-
-### AI data flow
-
-Only `vscode.lm` receives AI-bound data in V1. The model sees serialized DebugSession metadata and bounded project excerpts. It does not receive screenshot bytes, pairing tokens, workspace roots, or arbitrary files. Invalid JSON is rejected. Unknown evidence ids and invented paths are dropped or fail validation rather than being partially trusted.
-
-### Resource bounds
+### Capture limits
 
 | Resource | Cap |
 | --- | --- |
@@ -476,26 +270,18 @@ Only `vscode.lm` receives AI-bound data in V1. The model sees serialized DebugSe
 | Network failure entries | 100 |
 | Discovered source files | 500 |
 | Ranked candidates | 12 |
-| Diagnosis AI input | 24k chars |
-| Concurrent diagnosis | 1 (`beginRun`) |
-| Concurrent proposal | 1 (`beginRun`) |
+| Diagnosis AI input | 24,000 characters |
+| Concurrent diagnosis or proposal | 1 |
 
-Completed and cancelled operations must not retain screenshot bytes after bridge stop. Proposal objects live only in `FixProposalController` memory and are dropped on clear, new diagnosis, or extension deactivation.
+### Maintainer checklist
 
-### Known redaction limitations
-
-Redaction is heuristic. Query values stay visible only for a small set of routing names such as `id`, `q`, and `page`. Other query values, token-like URL fragments, JWTs, and `Bearer` tokens in text are redacted. Secrets that match none of those shapes can still remain in DOM text or console messages. Screenshots are never OCR'd. Console stacks may still contain file paths. Do not claim perfect secret detection.
-
-### Maintainer security checklist
-
-- [ ] Chrome `permissions` / `host_permissions` unchanged unless a documented requirement exists
+- [ ] Chrome `permissions` and `host_permissions` stay as documented unless a requirement is written down
 - [ ] No `<all_urls>`, `debugger`, `cookies`, or `webRequest`
-- [ ] Bridge still binds `127.0.0.1` only
-- [ ] Bearer comparison remains timing-safe; pairing token never logged
-- [ ] Origin policy not weakened to make tests pass
-- [ ] Candidate allowlist and source-hash validation not bypassed
-- [ ] Apply remains the only `WorkspaceEdit` path. It still requires Review, names the files in the confirmation, and re-checks the full-file hash, stored diff, and canonical path. The write opens the real path from that last check
-- [ ] No new AI SDKs, cloud endpoints, or telemetry
-- [ ] Schema/protocol changes ship with compatibility tests
-- [ ] Future Apply changes must keep the canonical path check and the stale-source re-read
-
+- [ ] The bridge still binds `127.0.0.1` only
+- [ ] Bearer comparison stays timing-safe, and the pairing token is never logged
+- [ ] Origin checks are not weakened to make a test pass
+- [ ] Candidate allowlist, excerpt hash, and full-file hash checks stay on the Apply path
+- [ ] `browserDebugBridge.applyFix` remains the only `WorkspaceEdit` path
+- [ ] Apply still requires Review, names the files, rechecks the canonical path, and verifies the saved bytes
+- [ ] No new AI SDK, cloud endpoint, or telemetry
+- [ ] Schema changes ship with compatibility tests

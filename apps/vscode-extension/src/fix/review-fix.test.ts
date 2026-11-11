@@ -85,8 +85,8 @@ describe("native diff review planner", () => {
     assert.equal(prepared.files[0]?.relativePath, CHECKOUT);
     assert.equal(prepared.files[0]?.currentContent, FAKE_CHECKOUT_SOURCE);
     assert.equal(prepared.files[0]?.proposedContent, EXPECTED_AFTER);
-    assert.equal(prepared.files[0]?.title.includes("checkout.ts"), true);
-    assert.equal(prepared.files[0]?.title.includes("Proposed change"), true);
+    assert.equal(prepared.files[0]?.title.includes("src/services/checkout.ts"), true);
+    assert.equal(prepared.files[0]?.title.includes("Current ↔ Proposed"), true);
   });
 
   it("refuses a missing proposal", () => {

@@ -135,13 +135,13 @@ A captured session (a real browser version, not the synthetic `0.0.0-fake` versi
 
 **Submit test session** in the popup, **Diagnose Test Session**, and **Create Test Session** use a synthetic session. A later synthetic session does not replace the latest captured session.
 
-**Diagnose Latest Session** and **Refresh Diagnosis** use the newest captured session. They do not create one. Open a workspace folder first. The activity-bar view is **Browser Debug Bridge → Diagnosis**.
+**Diagnose Latest Session** uses the newest captured session. It does not create one. **Refresh** reloads the Diagnosis view and does not call the model. Open a workspace folder first. The activity-bar view is **Browser Debug Bridge → Diagnosis**.
 
 **Analyze Test Session** prints a project-intelligence summary. It does not call the language model.
 
 ## How AI diagnosis works
 
-**Diagnose Latest Session**, **Refresh Diagnosis**, **Diagnose Test Session**, or the notification's **Diagnose** action runs project intelligence, then `vscode.lm`.
+**Diagnose Latest Session**, **Diagnose Test Session**, or the notification's **Diagnose** action runs project intelligence, then `vscode.lm`. If a proposal is already stored, Diagnose asks before discarding it.
 
 Project intelligence searches the open workspace, drops ignored and sensitive paths, and ranks at most 12 candidate files with bounded excerpts. The model sees the serialized session and those excerpts. It does not receive screenshot bytes, a filesystem API, or a workspace-edit API. `vscode.lm` is called with two User messages because that API has no system role. If several models exist, the extension picks the first after a stable vendor, family, and id sort. If none exist, the result is `AI_UNAVAILABLE` and the previous diagnosis is kept.
 
@@ -206,7 +206,7 @@ Messages in the UI stay short. The **Browser Debug Bridge** output channel recor
 | Pairing fails or HTTP 401 | The token does not match SecretStorage. Show the pairing code again and pair again. A rejected token is not saved. |
 | `ORIGIN_NOT_ALLOWED` | `browserDebugBridge.chromeExtensionId` does not match the ID on `chrome://extensions`. Restart the bridge after changing it. |
 | Invalid session or screenshot | The JPEG was missing, was not a JPEG, was over 1 MB, or its SHA-256 did not match the session. |
-| No debug session | Capture a page, or use **Diagnose Test Session**. **Refresh Diagnosis** does not create a session. A synthetic session is not used by **Diagnose Latest Session**. |
+| No debug session | Capture a page, or use **Diagnose Test Session**. **Refresh** does not create a session. A synthetic session is not used by **Diagnose Latest Session**. |
 | Open a workspace folder | No workspace folder is open in the Extension Development Host. |
 | AI provider unavailable | No `vscode.lm` model is available. The previous diagnosis is kept. |
 | AI response invalid | The model JSON failed validation. The previous diagnosis or proposal is kept. |

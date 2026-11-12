@@ -30,6 +30,10 @@ describe("workspace path safety", () => {
     assert.equal(isIgnoredRelativePath(".next/cache/index.js"), true);
     assert.equal(isIgnoredRelativePath(".env"), true);
     assert.equal(isIgnoredRelativePath(".env.local"), true);
+    assert.equal(isIgnoredRelativePath(".envrc"), true);
+    assert.equal(isIgnoredRelativePath(".npmrc"), true);
+    assert.equal(isIgnoredRelativePath("certs/app.pfx"), true);
+    assert.equal(isIgnoredRelativePath("certs/app.p12"), true);
     assert.equal(isIgnoredRelativePath("id_rsa"), true);
     assert.equal(isIgnoredRelativePath("credentials.json"), true);
     assert.equal(isIgnoredRelativePath("secrets.json"), true);

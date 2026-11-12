@@ -8,7 +8,8 @@ import {
   isProjectEvidence,
   parseEvidenceRef,
 } from "./evidence-refs.js";
-import { OPEN_CANDIDATE_COMMAND, REVIEW_FIX_COMMAND } from "./constants.js";
+import { OPEN_CANDIDATE_COMMAND, OPEN_SCREENSHOT_COMMAND, REVIEW_FIX_COMMAND } from "./constants.js";
+import { formatScreenshotDescription } from "./screenshot-view.js";
 import type { DiagnosisViewState } from "./diagnosis-state.js";
 import { asPlainTooltip, asPlainTreeText } from "./plain-text.js";
 
@@ -79,6 +80,7 @@ export type DiagnosisTreeNode = (
       tooltip: string;
       relativePath?: string;
     }
+  | { kind: "screenshot"; id: string; label: string; tooltip: string }
   | { kind: "limitations"; id: string; label: string }
   | { kind: "limitation"; id: string; label: string; tooltip: string }
   | { kind: "proposed-fix"; id: string; label: string }
@@ -136,6 +138,7 @@ export function getRootNodes(state: DiagnosisViewState | undefined): DiagnosisTr
   if (collectEvidence(diagnosis, state.project).length > 0) {
     nodes.push({ kind: "evidence", id: "evidence", label: "Evidence" });
   }
+  nodes.push(screenshotNode(state));
   if (diagnosis.limitations.length > 0) {
     nodes.push({
       kind: "limitations",
@@ -241,6 +244,13 @@ export function openableRelativePath(node: DiagnosisTreeNode): string | undefine
 }
 
 export function treeItemCommand(node: DiagnosisTreeNode): DiagnosisTreeCommand | undefined {
+  if (node.kind === "screenshot") {
+    return {
+      command: OPEN_SCREENSHOT_COMMAND,
+      title: "Open screenshot",
+      arguments: [],
+    };
+  }
   if (node.kind === "proposal-diff" || node.kind === "proposal-file") {
     return {
       command: REVIEW_FIX_COMMAND,
@@ -297,6 +307,20 @@ export function collectTreeNodes(
   };
   walk(getRootNodes(state));
   return nodes;
+}
+
+function screenshotNode(state: DiagnosisViewState): DiagnosisTreeNode {
+  const description = formatScreenshotDescription(state.session.screenshot);
+  return {
+    kind: "screenshot",
+    id: "screenshot",
+    label: "Screenshot",
+    description,
+    tooltip: asPlainTooltip(
+      `${description}. Open the stored image. It stays on this machine and is not sent to the model.`,
+    ),
+    icon: "file",
+  };
 }
 
 function hypothesisChildren(state: DiagnosisViewState, index: number): DiagnosisTreeNode[] {

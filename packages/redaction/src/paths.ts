@@ -144,7 +144,8 @@ function basename(path: string): string {
 }
 
 function isEnvFile(name: string): boolean {
-  return name === ".env" || name.startsWith(".env.");
+  const lower = name.toLowerCase();
+  return lower === ".env" || lower.startsWith(".env.") || lower === ".envrc";
 }
 
 function isPemFile(name: string): boolean {
@@ -152,11 +153,19 @@ function isPemFile(name: string): boolean {
 }
 
 function isPrivateKeyFile(name: string): boolean {
-  return PRIVATE_KEY_BASENAMES.has(name);
+  const lower = name.toLowerCase();
+  return (
+    PRIVATE_KEY_BASENAMES.has(name) ||
+    PRIVATE_KEY_BASENAMES.has(lower) ||
+    lower.endsWith(".key") ||
+    lower.endsWith(".pfx") ||
+    lower.endsWith(".p12")
+  );
 }
 
 function isCredentialsFile(name: string): boolean {
-  return CREDENTIAL_BASENAMES.has(name.toLowerCase());
+  const lower = name.toLowerCase();
+  return CREDENTIAL_BASENAMES.has(lower) || lower === ".npmrc";
 }
 
 export function inspectWorkspacePath(

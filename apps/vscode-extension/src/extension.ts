@@ -41,6 +41,7 @@ import {
   HAS_DIAGNOSIS_CONTEXT,
   HAS_FIX_PROPOSAL_CONTEXT,
   OPEN_CANDIDATE_COMMAND,
+  OPEN_SCREENSHOT_COMMAND,
   PROPOSE_FIX_COMMAND,
   REFRESH_DIAGNOSIS_COMMAND,
   REJECT_FIX_COMMAND,
@@ -67,6 +68,7 @@ import { logSafeReviewError, userFacingReviewError } from "./ui/review-errors.js
 import { createVscodeReviewOpener, registerProposedPreviewProvider } from "./ui/review-diff.js";
 import { clearDiagnosisView, selectDiagnosisSession, type DiagnosisSelection } from "./ui/diagnosis-selection.js";
 import { runDiagnosis, type DiagnosisRunOutcome } from "./ui/run-diagnosis.js";
+import { prepareScreenshotPreview } from "./ui/screenshot-view.js";
 import { createVscodeCandidateOpener } from "./ui/vscode-open.js";
 
 let bridge: BridgeServer | undefined;
@@ -574,6 +576,28 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       if (outcome.status !== "opened") {
         void vscode.window.showWarningMessage(outcome.message);
       }
+    }),
+    vscode.commands.registerCommand(OPEN_SCREENSHOT_COMMAND, () => {
+      const session = controller.getDiagnosis()?.session;
+      if (session === undefined) {
+        void vscode.window.showWarningMessage("No diagnosis is open.");
+        return;
+      }
+      const preview = prepareScreenshotPreview({
+        expectedSha256: session.screenshot.sha256,
+        bytes: bridge?.getScreenshot(session.sessionId)?.bytes,
+      });
+      if (preview.status !== "ready") {
+        void vscode.window.showWarningMessage(preview.message);
+        return;
+      }
+      const panel = vscode.window.createWebviewPanel(
+        "browserDebugBridge.screenshot",
+        "Captured screenshot",
+        vscode.ViewColumn.Beside,
+        { enableScripts: false, localResourceRoots: [] },
+      );
+      panel.webview.html = preview.html;
     }),
   );
 }

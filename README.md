@@ -11,6 +11,7 @@ Nothing in this repository sends session data to a project-owned cloud backend. 
 - Element picker on the tab where you start capture (`activeTab` and `scripting`)
 - Bounded DOM and computed-CSS capture, with shared redaction
 - Cropped JPEG of the selected visible region (max 1600×1200, about 1 MB), uploaded separately from the session JSON
+- Diagnosis view lists the screenshot size and crop, and can open the stored JPEG locally
 - The most recent 50 console entries and the most recent 100 network **failures** for that capture
 - Loopback bridge at `127.0.0.1:17321` with a pairing token, Origin checks, body limits, and in-memory session storage
 - Ranked workspace candidates and bounded source excerpts
@@ -181,8 +182,8 @@ A crash during a multi-file save can still leave a subset of files updated. Appl
 - `requestId` values are kept for the life of the bridge process. Reusing one for a different session is rejected. Submitting the same body again does not make that session the latest.
 - A different payload for an existing session id is rejected.
 - URLs, DOM fields, and console text pass through redaction before submit. Routing query names such as `id`, `q`, and `page` can keep their values. Other query values, token-like URL fragments, JWTs, and `Bearer` tokens in text are redacted.
-- Screenshot bytes stay in the bridge process. The model receives mime, size, hash, and whether the image was cropped.
-- Proposed paths must be diagnosis candidates. Lexical checks reject traversal, absolute paths outside the workspace, UNC paths, and sensitive basenames such as `.env` and private-key names. Apply also resolves `realpath` and opens that real path immediately before `WorkspaceEdit`.
+- Screenshot bytes stay in memory. The Diagnosis view can open the stored JPEG. The model receives mime, dimensions, hash, and whether the image was cropped.
+- Proposed paths must be diagnosis candidates. Lexical checks reject traversal, absolute paths outside the workspace, UNC paths, and sensitive basenames such as `.env`, `.envrc`, `.npmrc`, and private-key or certificate names. Apply also resolves `realpath` and opens that real path immediately before `WorkspaceEdit`.
 - Apply cannot run by itself. Review and the confirmation dialog are required.
 
 ## Known limitations
@@ -190,7 +191,7 @@ A crash during a multi-file save can still leave a subset of files updated. Appl
 - Redaction is heuristic. A secret that does not match those shapes can remain in DOM text, console text, or the cropped screenshot. Screenshots are not OCR'd.
 - While capture is active, a page script can dispatch `bdb:console` or `bdb:network`. Those events are recorded like hook events. Treat captured page text as untrusted. Apply still requires Review and confirmation.
 - Console and network buffers live in the extension service worker. A worker restart drops them.
-- Screenshot bytes are not shown in the Diagnosis view and are not sent to the model.
+- Screenshot bytes are not sent to the model. Opening the Diagnosis screenshot shows the stored JPEG in a local panel and does not write it to disk.
 - There is no WebSocket stream and no marketplace package.
 - `vscode.lm` has to be available for a live diagnosis. The automated tests never call it.
 - Multi-file Apply is not an atomic disk transaction.

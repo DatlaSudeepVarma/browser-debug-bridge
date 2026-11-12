@@ -193,6 +193,14 @@ describe("workspace path safety", () => {
     assert.equal(isSafeWorkspacePath(workspace, "credentials.json"), false);
   });
 
+  it("rejects envrc, npmrc, and certificate bundles", () => {
+    assert.equal(isSafeWorkspacePath(workspace, ".envrc"), false);
+    assert.equal(isSafeWorkspacePath(workspace, ".npmrc"), false);
+    assert.equal(isSafeWorkspacePath(workspace, "certs/app.pfx"), false);
+    assert.equal(isSafeWorkspacePath(workspace, "certs/app.p12"), false);
+    assert.equal(isSafeWorkspacePath(workspace, "secrets/service.key"), false);
+  });
+
   it("rejects Windows and POSIX absolute, UNC, and device-namespace paths", () => {
     assert.equal(isSafeWorkspacePath("C:/workspace", "C:/Windows/System32/drivers/etc/hosts"), false);
     assert.equal(isSafeWorkspacePath("C:/workspace", "C:\\secret.ts"), false);

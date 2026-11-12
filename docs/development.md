@@ -311,7 +311,7 @@ A small fake Next.js shop lives at `apps/vscode-extension/test-fixtures/fixture-
 2. Command Palette → **Browser Debug Bridge: Analyze Test Session**.
 3. Confirm the **Browser Debug Bridge** output lists workspace identity, framework/package-manager hints, and ranked candidate paths with reasons only.
 4. Run the command again. Ordering of equal-score paths must stay stable.
-5. Confirm `.env`, `id_rsa`, `node_modules`, and `127.0.0.1:17321` do not appear as candidates.
+5. Confirm `.env`, `.envrc`, `.npmrc`, `id_rsa`, `node_modules`, and `127.0.0.1:17321` do not appear as candidates.
 6. Close all workspace folders and run the command again — the result must be `no workspace`, not a crash.
 
 The command uses the latest stored session when one exists, otherwise `createFakeDebugSessionV1()`. The fake schema session is generic (`/profile`, `fake-submit`); the checkout fixture session is test-only and is not sent to Chrome.

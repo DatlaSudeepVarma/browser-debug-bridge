@@ -102,7 +102,7 @@ JSON bodies stop at 5 MB. JPEG bodies stop at 1 MB and must start with JPEG magi
 - `redactUrl` redacts sensitive query names, JWTs, and any query value whose name is not in `PUBLIC_QUERY_PARAMETER_NAMES` (`id`, `q`, `query`, `search`, `state`, `page`, `limit`, `offset`, `sort`, `order`, `tab`, `view`, `lang`, `locale`, `ref`, `utm_source`, `utm_medium`, `utm_campaign`, `utm_content`, `utm_term`). Token-like URL fragments are redacted. A fragment without those shapes, such as a short slug, can remain.
 - `redactSensitiveText` redacts JWTs and `Bearer` tokens in free text.
 - DOM helpers redact sensitive attributes, `javascript:` URLs, and `data:` URLs.
-- `inspectWorkspacePath` rejects traversal, NUL bytes, absolute paths outside the workspace folder, UNC and `\\?\` paths, drive-relative paths, and sensitive basenames such as `.env` and private-key names. `~` is not expanded.
+- `inspectWorkspacePath` rejects traversal, NUL bytes, absolute paths outside the workspace folder, UNC and `\\?\` paths, drive-relative paths, and sensitive basenames such as `.env`, `.envrc`, `.npmrc`, `.pem`, `.key`, `.pfx`, and `.p12`. `~` is not expanded.
 
 Redaction runs before submit. Page text, URLs, attributes, and the user description stay untrusted data. The model is told not to follow instructions inside them.
 
@@ -120,7 +120,7 @@ Bytes are uploaded first:
 
 `session.submit` is accepted for a JPEG session only when a pending artifact with that SHA-256 is already stored. A rejected metadata body deletes the pending JPEG. Evicting a session deletes its screenshot. At most 20 artifacts are kept. Nothing is written to disk.
 
-The model receives mime, dimensions, hash, and whether the image was cropped. It does not receive the bytes. The Diagnosis view does not render them.
+The model receives mime, dimensions, hash, and whether the image was cropped. It does not receive the bytes. The Diagnosis view lists those dimensions and can open the stored JPEG in a local panel. That panel does not write the image to disk.
 
 ## 8. AI interaction
 

@@ -57,14 +57,24 @@ export function isIgnoredDirectoryName(name: string): boolean {
 }
 
 export function isSecretOrProtectedFileName(name: string): boolean {
-  if (name === ".env" || name.startsWith(".env.")) {
-    return true;
-  }
   const lower = name.toLowerCase();
-  if (lower.endsWith(".pem") || lower.endsWith(".key")) {
+  if (lower === ".env" || lower.startsWith(".env.") || lower === ".envrc" || lower === ".npmrc") {
     return true;
   }
-  if (lower.startsWith("id_rsa") || lower.startsWith("id_dsa") || lower.startsWith("id_ed25519")) {
+  if (
+    lower.endsWith(".pem") ||
+    lower.endsWith(".key") ||
+    lower.endsWith(".pfx") ||
+    lower.endsWith(".p12")
+  ) {
+    return true;
+  }
+  if (
+    lower.startsWith("id_rsa") ||
+    lower.startsWith("id_dsa") ||
+    lower.startsWith("id_ecdsa") ||
+    lower.startsWith("id_ed25519")
+  ) {
     return true;
   }
   if (lower.includes("credentials") || lower.includes("secrets")) {

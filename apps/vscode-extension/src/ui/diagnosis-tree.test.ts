@@ -6,7 +6,7 @@ import { FAKE_DIAGNOSIS } from "../ai/fake-provider.js";
 import { createFixtureAiProjectContext } from "../ai/test-support.js";
 import { FIXTURE_CHECKOUT_SERVICE } from "../project/test-fixtures/files.js";
 import type { DiagnosisViewState } from "./diagnosis-state.js";
-import { OPEN_CANDIDATE_COMMAND, REVIEW_FIX_COMMAND } from "./constants.js";
+import { OPEN_CANDIDATE_COMMAND, OPEN_SCREENSHOT_COMMAND, REVIEW_FIX_COMMAND } from "./constants.js";
 import {
   collectTreeNodes,
   getChildNodes,
@@ -42,6 +42,7 @@ describe("diagnosis tree construction", () => {
       "hypotheses",
       "suggested-next-step",
       "evidence",
+      "screenshot",
       "limitations",
       "proposed-fix",
     ]);
@@ -91,7 +92,7 @@ describe("diagnosis tree construction", () => {
       suggestedNextStep: "",
       limitations: [],
     });
-    assert.deepEqual(kinds(getRootNodes(state)), ["summary", "proposed-fix"]);
+    assert.deepEqual(kinds(getRootNodes(state)), ["summary", "screenshot", "proposed-fix"]);
   });
 
   it("omits empty candidate-file and evidence groups under a hypothesis", () => {
@@ -130,6 +131,20 @@ describe("diagnosis tree construction", () => {
     const command = treeItemCommand(candidate);
     assert.equal(command?.command, OPEN_CANDIDATE_COMMAND);
     assert.deepEqual(command?.arguments, ["src/services/checkout.ts", 1]);
+  });
+
+  it("shows screenshot dimensions and opens the stored image without embedding it", () => {
+    const screenshot = collectTreeNodes(viewState()).find((node) => node.kind === "screenshot");
+    assert.equal(screenshot?.kind, "screenshot");
+    if (screenshot?.kind !== "screenshot") {
+      return;
+    }
+    assert.equal(screenshot.label, "Screenshot");
+    assert.equal(screenshot.description, "32×32, cropped");
+    assert.equal(screenshot.label.includes("e3b0c442"), false);
+    const command = treeItemCommand(screenshot);
+    assert.equal(command?.command, OPEN_SCREENSHOT_COMMAND);
+    assert.deepEqual(command?.arguments, []);
   });
 });
 

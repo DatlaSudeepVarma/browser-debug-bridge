@@ -12,7 +12,7 @@ import {
 import { createBridgeHandler } from "./handler.js";
 import { createConsoleLogger, type BridgeLogger } from "./logger.js";
 import { ScreenshotStore, type ScreenshotArtifact } from "./screenshot-store.js";
-import { SessionStore } from "./session-store.js";
+import { SessionStore, type StoredSession } from "./session-store.js";
 
 export interface BridgeServerOptions {
   extensionVersion: string;
@@ -74,6 +74,10 @@ export class BridgeServer {
 
   public latestSyntheticSession(): DebugSessionV1 | undefined {
     return this.store.latest("synthetic")?.session;
+  }
+
+  public capturedSessions(): readonly StoredSession[] {
+    return this.store.list("captured");
   }
 
   public sessionCount(): number {

@@ -34,6 +34,7 @@ import { runFixProposal } from "./fix/run-proposal.js";
 import type { StoredProposal } from "./fix/types.js";
 import {
   APPLY_FIX_COMMAND,
+  BROWSE_CAPTURED_SESSIONS_COMMAND,
   CLEAR_DIAGNOSIS_COMMAND,
   DIAGNOSE_LATEST_SESSION_COMMAND,
   DIAGNOSE_TEST_SESSION_COMMAND,
@@ -374,6 +375,30 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     }),
     vscode.commands.registerCommand(DIAGNOSE_LATEST_SESSION_COMMAND, async () => {
       await executeDiagnosis({ source: "captured" });
+    }),
+    vscode.commands.registerCommand(BROWSE_CAPTURED_SESSIONS_COMMAND, async () => {
+      const sessions = bridge?.capturedSessions() ?? [];
+      if (sessions.length === 0) {
+        void vscode.window.showWarningMessage(
+          "No captured browser sessions are available.",
+        );
+        return;
+      }
+      const selected = await vscode.window.showQuickPick(
+        sessions.map((stored) => ({
+          label: asPlainTreeText(stored.session.page.title) || stored.session.page.origin,
+          description: new Date(stored.receivedAt).toLocaleString(),
+          detail: stored.session.page.url,
+          sessionId: stored.session.sessionId,
+        })),
+        {
+          title: "Browser Debug Bridge: Captured Sessions",
+          placeHolder: "Select a captured session to diagnose",
+        },
+      );
+      if (selected !== undefined) {
+        await executeDiagnosis({ source: "id", sessionId: selected.sessionId });
+      }
     }),
     vscode.commands.registerCommand(REFRESH_DIAGNOSIS_COMMAND, () => {
       treeProvider.refresh();

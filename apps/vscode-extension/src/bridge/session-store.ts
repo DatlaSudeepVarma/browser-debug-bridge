@@ -73,4 +73,15 @@ export class SessionStore {
   public clear(): void {
     this.sessions.clear();
   }
+
+  public clearCaptured(): number {
+    let removed = 0;
+    for (const [sessionId, stored] of this.sessions) {
+      if (stored.origin === "captured") {
+        this.sessions.delete(sessionId);
+        removed += 1;
+      }
+    }
+    return removed;
+  }
 }

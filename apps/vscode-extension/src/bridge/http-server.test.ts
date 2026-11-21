@@ -117,6 +117,17 @@ describe("SessionStore", () => {
       [newer.sessionId, older.sessionId],
     );
   });
+
+  it("clears captured sessions while preserving synthetic sessions", () => {
+    const store = new SessionStore(4);
+    const captured = createFakeSessionSubmission().session;
+    const synthetic = createFakeSessionSubmission().session;
+    store.add(captured, 10, "captured");
+    store.add(synthetic, 20, "synthetic");
+    assert.equal(store.clearCaptured(), 1);
+    assert.equal(store.get(captured.sessionId), undefined);
+    assert.equal(store.get(synthetic.sessionId)?.origin, "synthetic");
+  });
 });
 
 describe("BridgeServer HTTP", () => {

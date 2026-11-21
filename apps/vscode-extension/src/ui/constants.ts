@@ -6,6 +6,7 @@ export const CLEAR_DIAGNOSIS_COMMAND = "browserDebugBridge.clearDiagnosis";
 export const DIAGNOSE_TEST_SESSION_COMMAND = "browserDebugBridge.diagnoseTestSession";
 export const DIAGNOSE_LATEST_SESSION_COMMAND = "browserDebugBridge.diagnoseLatestSession";
 export const BROWSE_CAPTURED_SESSIONS_COMMAND = "browserDebugBridge.browseCapturedSessions";
+export const CLEAR_CAPTURE_HISTORY_COMMAND = "browserDebugBridge.clearCaptureHistory";
 export const PROPOSE_FIX_COMMAND = "browserDebugBridge.proposeFix";
 export const REVIEW_FIX_COMMAND = "browserDebugBridge.reviewFix";
 export const REJECT_FIX_COMMAND = "browserDebugBridge.rejectFix";

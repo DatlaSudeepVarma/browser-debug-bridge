@@ -35,6 +35,7 @@ import type { StoredProposal } from "./fix/types.js";
 import {
   APPLY_FIX_COMMAND,
   BROWSE_CAPTURED_SESSIONS_COMMAND,
+  CLEAR_CAPTURE_HISTORY_COMMAND,
   CLEAR_DIAGNOSIS_COMMAND,
   DIAGNOSE_LATEST_SESSION_COMMAND,
   DIAGNOSE_TEST_SESSION_COMMAND,
@@ -399,6 +400,25 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       if (selected !== undefined) {
         await executeDiagnosis({ source: "id", sessionId: selected.sessionId });
       }
+    }),
+    vscode.commands.registerCommand(CLEAR_CAPTURE_HISTORY_COMMAND, async () => {
+      const count = bridge?.capturedSessions().length ?? 0;
+      if (count === 0) {
+        void vscode.window.showInformationMessage("No captured browser sessions to clear.");
+        return;
+      }
+      const choice = await vscode.window.showWarningMessage(
+        `Clear ${String(count)} captured browser session${count === 1 ? "" : "s"} and their screenshots?`,
+        { modal: true },
+        "Clear",
+      );
+      if (choice !== "Clear") {
+        return;
+      }
+      const removed = bridge?.clearCapturedSessions() ?? 0;
+      void vscode.window.showInformationMessage(
+        `Cleared ${String(removed)} captured browser session${removed === 1 ? "" : "s"}.`,
+      );
     }),
     vscode.commands.registerCommand(REFRESH_DIAGNOSIS_COMMAND, () => {
       treeProvider.refresh();

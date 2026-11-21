@@ -81,7 +81,8 @@ export function applyUnrestoredMessage(relativePaths: readonly string[]): string
   return `The proposed change could not be finished, and these files could not be restored: ${listed}. Check them before editing further.`;
 }
 
-export function applyConfirmMessage(_relativePaths: readonly string[]): string {
+export function applyConfirmMessage(relativePaths: readonly string[]): string {
+  void relativePaths;
   return "Apply this proposed change? The current workspace contents will be overwritten and saved.";
 }
 

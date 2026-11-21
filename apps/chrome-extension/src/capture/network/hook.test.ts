@@ -9,7 +9,7 @@ class CaptureWindow extends EventTarget {
 
 class FakeXhr {
   public status = 0;
-  public open(_method: string, _url: string): void {}
+  public open(): void {}
   public send(): void {}
   public addEventListener(): void {}
 }

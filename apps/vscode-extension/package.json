@@ -61,6 +61,11 @@
         "category": "Browser Debug Bridge"
       },
       {
+        "command": "browserDebugBridge.clearCaptureHistory",
+        "title": "Clear Capture History",
+        "category": "Browser Debug Bridge"
+      },
+      {
         "command": "browserDebugBridge.refreshDiagnosis",
         "title": "Refresh",
         "category": "Browser Debug Bridge",

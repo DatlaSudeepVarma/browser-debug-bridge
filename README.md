@@ -138,6 +138,8 @@ A captured session (a real browser version, not the synthetic `0.0.0-fake` versi
 
 Use **Browse Captured Sessions** to choose an older captured session for diagnosis. The in-memory history shows the newest captured sessions first and retains up to 20 sessions while the bridge is running.
 
+Use **Clear Capture History** to remove captured sessions and screenshots. Synthetic test sessions are preserved.
+
 **Diagnose Latest Session** uses the newest captured session. It does not create one. **Refresh** reloads the Diagnosis view and does not call the model. Open a workspace folder first. The activity-bar view is **Browser Debug Bridge → Diagnosis**.
 
 **Analyze Test Session** prints a project-intelligence summary. It does not call the language model.

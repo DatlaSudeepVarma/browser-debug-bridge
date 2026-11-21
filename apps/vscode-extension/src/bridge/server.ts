@@ -80,6 +80,15 @@ export class BridgeServer {
     return this.store.list("captured");
   }
 
+  public clearCapturedSessions(): number {
+    const captured = this.store.list("captured");
+    const removed = this.store.clearCaptured();
+    for (const stored of captured) {
+      this.screenshots.delete(stored.session.sessionId);
+    }
+    return removed;
+  }
+
   public sessionCount(): number {
     return this.store.size;
   }

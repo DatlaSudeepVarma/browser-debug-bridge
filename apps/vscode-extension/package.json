@@ -56,6 +56,11 @@
         "icon": "$(lightbulb)"
       },
       {
+        "command": "browserDebugBridge.browseCapturedSessions",
+        "title": "Browse Captured Sessions",
+        "category": "Browser Debug Bridge"
+      },
+      {
         "command": "browserDebugBridge.refreshDiagnosis",
         "title": "Refresh",
         "category": "Browser Debug Bridge",

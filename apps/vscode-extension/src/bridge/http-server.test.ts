@@ -103,6 +103,20 @@ describe("SessionStore", () => {
     assert.equal(store.latest("synthetic")?.session.sessionId, synthetic.sessionId);
     assert.equal(store.latest()?.session.sessionId, synthetic.sessionId);
   });
+
+  it("lists captured sessions newest first without synthetic sessions", () => {
+    const store = new SessionStore(4);
+    const older = createFakeSessionSubmission().session;
+    const newer = createFakeSessionSubmission().session;
+    const synthetic = createFakeSessionSubmission().session;
+    store.add(older, 10, "captured");
+    store.add(newer, 20, "captured");
+    store.add(synthetic, 30, "synthetic");
+    assert.deepEqual(
+      store.list("captured").map((item) => item.session.sessionId),
+      [newer.sessionId, older.sessionId],
+    );
+  });
 });
 
 describe("BridgeServer HTTP", () => {

@@ -51,6 +51,12 @@ export class SessionStore {
     return [...this.sessions.keys()];
   }
 
+  public list(origin?: SessionOrigin): StoredSession[] {
+    return [...this.sessions.values()]
+      .filter((item) => origin === undefined || item.origin === origin)
+      .sort((left, right) => right.receivedAt - left.receivedAt);
+  }
+
   public latest(origin?: SessionOrigin): StoredSession | undefined {
     let found: StoredSession | undefined;
     for (const item of this.sessions.values()) {
